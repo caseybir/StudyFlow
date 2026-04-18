@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StudyFlow | AI Study Helper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar card">
+        <h1>StudyFlow</h1>
+        <p class="small-note">Frontend-only AI Study Helper</p>
+        <ul>
+          <li>✅ No login required</li>
+          <li>✅ Works with localStorage</li>
+          <li>✅ Cloudflare Pages ready</li>
+        </ul>
+      </aside>
+
+      <section id="app"></section>
+    </main>
+
+    <template id="dashboard-template">
+      <section class="card dashboard-header">
+        <div>
+          <h2>Your Dashboard</h2>
+          <p>Manage classes, upload materials, and generate study support instantly.</p>
+        </div>
+        <button id="show-add-class" class="btn btn-primary">+ Add New Class</button>
+      </section>
+
+      <section id="add-class-card" class="card hidden">
+        <h3>Add Class</h3>
+        <form id="class-form" class="grid-form">
+          <label>Class Name <input type="text" name="name" required /></label>
+          <label>Professor <input type="text" name="professor" required /></label>
+          <label>
+            Type
+            <select name="taskType" required>
+              <option value="exam">Exam</option>
+              <option value="project">Project / Assignment</option>
+            </select>
+          </label>
+          <label>Exam / Due Date <input type="date" name="examDate" /></label>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save Class</button>
+            <button type="button" id="cancel-add-class" class="btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <h3>Your Classes</h3>
+        <div id="class-grid" class="class-grid"></div>
+      </section>
+    </template>
+
+    <template id="workspace-template">
+      <section class="card workspace-header">
+        <div class="workspace-actions">
+          <button id="go-dashboard" class="btn btn-ghost">← Dashboard</button>
+          <button id="save-workspace" class="btn btn-primary">Save</button>
+        </div>
+        <h2 id="workspace-title"></h2>
+        <p id="workspace-meta"></p>
+      </section>
+
+      <section class="card tabs-wrap">
+        <div id="tab-nav" class="tab-nav"></div>
+      </section>
+
+      <section id="tab-content"></section>
+    </template>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.min.js"></script>
+    <script src="script.js"></script>
+  </body>
+</html>

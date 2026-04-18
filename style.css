@@ -1,0 +1,287 @@
+:root {
+  --bg: #f4f6fb;
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --primary: #4459ff;
+  --primary-dark: #3348ec;
+  --secondary: #0f766e;
+  --danger: #dc2626;
+  --border: #e5e7eb;
+  --radius-lg: 16px;
+  --radius-md: 10px;
+  --shadow: 0 10px 25px rgba(15, 23, 42, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: var(--text);
+  background: linear-gradient(170deg, #eef2ff 0%, var(--bg) 36%, #f8fafc 100%);
+  min-height: 100vh;
+}
+
+.app-shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2.5rem;
+}
+
+.topbar {
+  margin-bottom: 1.25rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 2.5vw, 2.2rem);
+  font-weight: 800;
+}
+
+.subtitle {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+}
+
+h2,
+h3 {
+  margin-top: 0;
+}
+
+p {
+  line-height: 1.55;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.section-title {
+  margin: 1.25rem 0 0.75rem;
+}
+
+.btn {
+  border: none;
+  border-radius: 999px;
+  font-weight: 600;
+  padding: 0.62rem 1rem;
+  cursor: pointer;
+  transition: transform 0.12s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--primary-dark);
+}
+
+.btn-secondary {
+  background: #e2f7f3;
+  color: #064e48;
+}
+
+.btn-secondary:hover {
+  background: #c9efe8;
+}
+
+.btn-ghost {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.btn-ghost:hover {
+  background: #e5e7eb;
+}
+
+.btn-danger {
+  background: #fee2e2;
+  color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: #fecaca;
+}
+
+.class-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 0.9rem;
+}
+
+.class-card {
+  border-left: 6px solid var(--primary);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.class-card .meta {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin: 0.1rem 0;
+}
+
+.class-card h4 {
+  margin: 0;
+}
+
+.card-actions {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.hidden {
+  display: none;
+}
+
+.grid-form {
+  display: grid;
+  gap: 0.8rem;
+}
+
+label {
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.94rem;
+  font-weight: 600;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.75rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+textarea {
+  resize: vertical;
+}
+
+input:focus,
+textarea:focus {
+  outline: 2px solid #c7d2fe;
+  border-color: #a5b4fc;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.form-actions.wrap {
+  flex-wrap: wrap;
+}
+
+.workspace-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+.workspace-header {
+  margin-bottom: 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.small-note {
+  color: var(--muted);
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.88rem;
+}
+
+.output-panel {
+  margin-top: 0.85rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: #fafbff;
+  padding: 0.9rem;
+  min-height: 190px;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.6rem 0;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--muted);
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-lg);
+  background: #fafbff;
+}
+
+.progress-list {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.progress-list li {
+  margin-bottom: 0.45rem;
+}
+
+@media (min-width: 900px) {
+  .workspace-layout {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .notes-card,
+  .output-card {
+    min-height: 600px;
+  }
+}
+
+@media (max-width: 640px) {
+  .dashboard-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .btn {
+    width: 100%;
+  }
+
+  .card-actions .btn,
+  .action-row .btn,
+  .form-actions .btn {
+    width: 100%;
+  }
+}

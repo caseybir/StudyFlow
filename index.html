@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>StudyFlow | Multi-User AI Academic Dashboard</title>
+    <title>StudyFlow | AI Study Helper</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -13,96 +13,69 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <main class="page-wrap">
-      <section id="auth-view" class="auth-shell card hidden"></section>
-      <section id="app-view" class="app-shell hidden"></section>
-    </main>
-
-    <template id="auth-template">
-      <div class="auth-header">
-        <h1>StudyFlow</h1>
-        <p>Sign in to access your personal AI study dashboard.</p>
-      </div>
-
-      <div class="auth-tabs">
-        <button class="tab-btn active" data-auth-tab="login">Log In</button>
-        <button class="tab-btn" data-auth-tab="signup">Sign Up</button>
-      </div>
-
-      <form id="login-form" class="auth-form">
-        <h3>Welcome back</h3>
-        <label>Email <input name="email" type="email" required /></label>
-        <label>Password <input name="password" type="password" required minlength="8" /></label>
-        <button class="btn btn-primary" type="submit">Log In</button>
-      </form>
-
-      <form id="signup-form" class="auth-form hidden">
-        <h3>Create account</h3>
-        <label>Email <input name="email" type="email" required /></label>
-        <label>Password <input name="password" type="password" required minlength="8" /></label>
-        <button class="btn btn-primary" type="submit">Sign Up</button>
-      </form>
-
-      <p id="auth-message" class="small-note"></p>
-    </template>
-
-    <template id="dashboard-template">
+    <main class="app-shell">
       <aside class="sidebar card">
-        <h2>StudyFlow</h2>
-        <p class="small-note">AI-powered student workspace</p>
-        <p class="small-note">Signed in as <strong id="user-email"></strong></p>
-        <button id="logout-btn" class="btn btn-ghost">Log Out</button>
+        <h1>StudyFlow</h1>
+        <p class="small-note">Frontend-only AI Study Helper</p>
+        <ul>
+          <li>✅ No login required</li>
+          <li>✅ Works with localStorage</li>
+          <li>✅ Cloudflare Pages ready</li>
+        </ul>
       </aside>
 
-      <section class="main-view">
-        <section class="dashboard-header card">
-          <div>
-            <h2>Dashboard</h2>
-            <p>All your classes, progress, files, and generated outputs in one place.</p>
+      <section id="app"></section>
+    </main>
+
+    <template id="dashboard-template">
+      <section class="card dashboard-header">
+        <div>
+          <h2>Your Dashboard</h2>
+          <p>Manage classes, upload materials, and generate study support instantly.</p>
+        </div>
+        <button id="show-add-class" class="btn btn-primary">+ Add New Class</button>
+      </section>
+
+      <section id="add-class-card" class="card hidden">
+        <h3>Add Class</h3>
+        <form id="class-form" class="grid-form">
+          <label>Class Name <input type="text" name="name" required /></label>
+          <label>Professor <input type="text" name="professor" required /></label>
+          <label>
+            Type
+            <select name="taskType" required>
+              <option value="exam">Exam</option>
+              <option value="project">Project / Assignment</option>
+            </select>
+          </label>
+          <label>Exam / Due Date <input type="date" name="examDate" /></label>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save Class</button>
+            <button type="button" id="cancel-add-class" class="btn btn-ghost">Cancel</button>
           </div>
-          <button id="open-add-class" class="btn btn-primary">+ Add New Class</button>
-        </section>
+        </form>
+      </section>
 
-        <section class="card hidden" id="add-class-panel">
-          <h3>Add Class</h3>
-          <form id="class-form" class="grid-form">
-            <label>Class Name <input type="text" name="name" required /></label>
-            <label>Professor <input type="text" name="professor" required /></label>
-            <label>
-              Task Type
-              <select name="taskType" required>
-                <option value="exam">Exam</option>
-                <option value="project">Project / Assignment</option>
-              </select>
-            </label>
-            <label>Next Due / Exam Date <input type="date" name="examDate" /></label>
-            <label>Tag <input type="text" name="tag" placeholder="optional" /></label>
-            <div class="form-actions">
-              <button class="btn btn-primary" type="submit">Save Class</button>
-              <button class="btn btn-ghost" type="button" id="cancel-add-class">Cancel</button>
-            </div>
-          </form>
-        </section>
-
-        <section>
-          <h3>Your Classes</h3>
-          <div id="class-grid" class="class-grid"></div>
-        </section>
+      <section>
+        <h3>Your Classes</h3>
+        <div id="class-grid" class="class-grid"></div>
       </section>
     </template>
 
     <template id="workspace-template">
-      <section class="workspace-header card">
-        <div class="workspace-top">
-          <button id="back-dashboard" class="btn btn-ghost">← Dashboard</button>
-          <button id="save-class" class="btn btn-primary">Save Class</button>
+      <section class="card workspace-header">
+        <div class="workspace-actions">
+          <button id="go-dashboard" class="btn btn-ghost">← Dashboard</button>
+          <button id="save-workspace" class="btn btn-primary">Save</button>
         </div>
         <h2 id="workspace-title"></h2>
         <p id="workspace-meta"></p>
-        <div id="workspace-readiness"></div>
       </section>
 
-      <section class="tabs card"><div id="tab-nav" class="tab-nav"></div></section>
+      <section class="card tabs-wrap">
+        <div id="tab-nav" class="tab-nav"></div>
+      </section>
+
       <section id="tab-content"></section>
     </template>
 

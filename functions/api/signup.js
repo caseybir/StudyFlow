@@ -1,4 +1,4 @@
-import { authCookie, createSession, hashPassword, json, readJson } from "../_utils.js";
+import { authCookie, createSession, json, readJson } from "../_utils.js";
 
 export async function onRequestPost(context) {
   const { env, request } = context;
@@ -12,7 +12,7 @@ export async function onRequestPost(context) {
   if (existing) return json({ ok: false, error: "Email already exists." }, 409);
 
   const id = crypto.randomUUID();
-  const passwordHash = await hashPassword(password);
+  const passwordHash = password;
   await env.DB.prepare("INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)")
     .bind(id, email.toLowerCase(), passwordHash)
     .run();

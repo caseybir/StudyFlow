@@ -1,421 +1,699 @@
-// StudyFlow - beginner-friendly static app using localStorage only.
-
-const STORAGE_KEY = "studyflow_classes_v1";
-
-const app = document.getElementById("app");
-
-const state = {
-  classes: loadClasses(),
-  currentClassId: null,
+const API = {
+  signup: "/api/signup",
+  login: "/api/login",
+  logout: "/api/logout",
+  me: "/api/me",
+  classes: "/api/classes",
+  materials: "/api/materials",
+  outputs: "/api/outputs",
+  chats: "/api/chats",
 };
 
-renderApp();
-
-// -------------------------
-// Storage logic
-// -------------------------
-function loadClasses() {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : [];
-  } catch (error) {
-    console.error("Error reading saved classes:", error);
-    return [];
-  }
+if (window.pdfjsLib) {
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.worker.min.js";
 }
 
-function saveClasses() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.classes));
-}
+const authView = document.getElementById("auth-view");
+const appView = document.getElementById("app-view");
 
-function getClassById(classId) {
-  return state.classes.find((item) => item.id === classId);
-}
+const state = {
+  user: null,
+  classes: [],
+  currentClassId: null,
+  activeTab: "overview",
+};
 
-// -------------------------
-// Rendering logic
-// -------------------------
-function renderApp() {
-  if (state.currentClassId) {
-    renderWorkspace(state.currentClassId);
-  } else {
+boot();
+
+async function boot() {
+  const me = await apiGet(API.me);
+  if (me.ok) {
+    state.user = me.user;
+    await loadClasses();
     renderDashboard();
+  } else {
+    renderAuth();
   }
+}
+
+// -----------------------------
+// Auth
+// -----------------------------
+function renderAuth() {
+  appView.classList.add("hidden");
+  authView.classList.remove("hidden");
+  const template = document.getElementById("auth-template");
+  authView.innerHTML = "";
+  authView.appendChild(template.content.cloneNode(true));
+
+  const loginForm = document.getElementById("login-form");
+  const signupForm = document.getElementById("signup-form");
+  const message = document.getElementById("auth-message");
+
+  document.querySelectorAll("[data-auth-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll("[data-auth-tab]").forEach((tab) => tab.classList.remove("active"));
+      button.classList.add("active");
+      const showLogin = button.dataset.authTab === "login";
+      loginForm.classList.toggle("hidden", !showLogin);
+      signupForm.classList.toggle("hidden", showLogin);
+      message.textContent = "";
+    });
+  });
+
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(loginForm));
+    const result = await apiPost(API.login, data);
+    if (!result.ok) {
+      message.textContent = result.error || "Login failed.";
+      return;
+    }
+
+    state.user = result.user;
+    await loadClasses();
+    renderDashboard();
+  });
+
+  signupForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(signupForm));
+    const result = await apiPost(API.signup, data);
+    if (!result.ok) {
+      message.textContent = result.error || "Signup failed.";
+      return;
+    }
+
+    state.user = result.user;
+    await loadClasses();
+    renderDashboard();
+  });
+}
+
+async function logout() {
+  await apiPost(API.logout, {});
+  state.user = null;
+  state.classes = [];
+  state.currentClassId = null;
+  renderAuth();
+}
+
+// -----------------------------
+// Classes and app views
+// -----------------------------
+async function loadClasses() {
+  const response = await apiGet(API.classes);
+  if (!response.ok) {
+    state.classes = [];
+    return;
+  }
+
+  state.classes = response.classes.map(ensureClassShape);
+}
+
+function ensureClassShape(item) {
+  return {
+    ...item,
+    inputs: item.inputs || {
+      materials: "",
+      testStyle: "",
+      emphasis: "",
+      struggles: "",
+      otherNotes: "",
+      uploadedFiles: [],
+    },
+    outputs: item.outputs || {},
+    chatHistory: item.chatHistory || [],
+  };
+}
+
+function getCurrentClass() {
+  return state.classes.find((course) => course.id === state.currentClassId);
 }
 
 function renderDashboard() {
-  const template = document.getElementById("dashboard-template");
-  app.innerHTML = "";
-  app.appendChild(template.content.cloneNode(true));
+  authView.classList.add("hidden");
+  appView.classList.remove("hidden");
 
-  const openAddBtn = document.getElementById("open-add-class");
-  const cancelBtn = document.getElementById("cancel-add-class");
+  const template = document.getElementById("dashboard-template");
+  appView.innerHTML = "";
+  appView.appendChild(template.content.cloneNode(true));
+
+  document.getElementById("user-email").textContent = state.user.email;
+  document.getElementById("logout-btn").addEventListener("click", logout);
+
+  const classGrid = document.getElementById("class-grid");
   const addPanel = document.getElementById("add-class-panel");
   const classForm = document.getElementById("class-form");
-  const classGrid = document.getElementById("class-grid");
 
-  openAddBtn.addEventListener("click", () => addPanel.classList.remove("hidden"));
-  cancelBtn.addEventListener("click", () => {
+  document.getElementById("open-add-class").addEventListener("click", () => addPanel.classList.remove("hidden"));
+  document.getElementById("cancel-add-class").addEventListener("click", () => {
     addPanel.classList.add("hidden");
     classForm.reset();
   });
 
-  classForm.addEventListener("submit", (event) => {
+  classForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const formData = new FormData(classForm);
+    const form = Object.fromEntries(new FormData(classForm));
+    const result = await apiPost(API.classes, form);
+    if (!result.ok) return alert(result.error || "Could not create class");
 
-    const newClass = {
-      id: crypto.randomUUID(),
-      name: formData.get("name")?.toString().trim() || "Untitled Class",
-      professor: formData.get("professor")?.toString().trim() || "Unknown",
-      examDate: formData.get("examDate")?.toString() || "",
-      tag: formData.get("tag")?.toString().trim() || "",
-      inputs: {
-        materials: "",
-        testStyle: "",
-        emphasis: "",
-        struggles: "",
-        otherNotes: "",
-      },
-      outputs: {
-        studyPlan: "",
-        summaryNotes: "",
-        practiceQuestions: "",
-      },
-      updatedAt: new Date().toISOString(),
-    };
-
-    state.classes.unshift(newClass);
-    saveClasses();
+    state.classes.unshift(ensureClassShape(result.classItem));
     renderDashboard();
   });
 
-  if (state.classes.length === 0) {
-    classGrid.innerHTML = `
-      <div class="empty-state">
-        <h4>No classes yet</h4>
-        <p>Add your first class to start building a personalized study flow.</p>
-      </div>
-    `;
+  if (!state.classes.length) {
+    classGrid.innerHTML = `<article class="card"><p class="small-note">No classes yet. Add one to start.</p></article>`;
     return;
   }
 
   classGrid.innerHTML = state.classes
     .map((course) => {
-      const examLabel = course.examDate ? formatDate(course.examDate) : "No exam date";
-      const borderColor = pickTagColor(course.tag);
-
+      const readiness = calculateReadiness(course);
       return `
-      <article class="card class-card" style="border-left-color:${borderColor}">
-        <div>
-          <h4>${escapeHtml(course.name)}</h4>
-          <p class="meta">Professor: ${escapeHtml(course.professor)}</p>
-          <p class="meta">Exam: ${escapeHtml(examLabel)}</p>
-          <p class="meta">Tag: ${escapeHtml(course.tag || "None")}</p>
-        </div>
-        <div class="card-actions">
-          <button class="btn btn-primary open-workspace" data-id="${course.id}">Open Workspace</button>
+      <article class="card class-card" style="border-left-color:${pickTagColor(course.tag)}">
+        <div class="file-row"><h4>${escapeHtml(course.name)}</h4><span class="badge ${readiness.label.toLowerCase()}">${readiness.label}</span></div>
+        <p class="card-meta">Professor: ${escapeHtml(course.professor || "-")}</p>
+        <p class="card-meta">Next ${course.taskType === "project" ? "Due" : "Exam"}: ${escapeHtml(course.examDate || "Not set")}</p>
+        <p class="card-meta">Files: ${course.inputs.uploadedFiles.length}</p>
+        <div class="progress"><span style="width:${readiness.score}%"></span></div>
+        <div class="form-actions">
+          <button class="btn btn-primary open-class" data-id="${course.id}">Open</button>
           <button class="btn btn-danger delete-class" data-id="${course.id}">Delete</button>
         </div>
-      </article>
-    `;
+      </article>`;
     })
     .join("");
 
-  document.querySelectorAll(".open-workspace").forEach((button) => {
+  document.querySelectorAll(".open-class").forEach((button) => {
     button.addEventListener("click", () => {
       state.currentClassId = button.dataset.id;
-      renderApp();
+      state.activeTab = "overview";
+      renderWorkspace();
     });
   });
 
   document.querySelectorAll(".delete-class").forEach((button) => {
-    button.addEventListener("click", () => {
-      const classId = button.dataset.id;
-      const course = getClassById(classId);
-      if (!course) return;
+    button.addEventListener("click", async () => {
+      const id = button.dataset.id;
+      const item = state.classes.find((course) => course.id === id);
+      if (!item) return;
+      if (!window.confirm(`Delete ${item.name}?`)) return;
 
-      const shouldDelete = window.confirm(`Delete ${course.name}? This cannot be undone.`);
-      if (!shouldDelete) return;
+      const deleted = await apiDelete(`${API.classes}/${id}`);
+      if (!deleted.ok) return alert("Failed to delete class.");
 
-      state.classes = state.classes.filter((item) => item.id !== classId);
-      saveClasses();
+      state.classes = state.classes.filter((course) => course.id !== id);
       renderDashboard();
     });
   });
 }
 
-function renderWorkspace(classId) {
-  const course = getClassById(classId);
+function renderWorkspace() {
+  const course = getCurrentClass();
+  if (!course) return renderDashboard();
 
-  if (!course) {
-    state.currentClassId = null;
-    renderDashboard();
+  const template = document.getElementById("workspace-template");
+  appView.innerHTML = "";
+  appView.appendChild(template.content.cloneNode(true));
+
+  document.getElementById("workspace-title").textContent = `${course.name} Workspace`;
+  document.getElementById("workspace-meta").textContent = `${course.professor} • ${course.taskType === "project" ? "Due" : "Exam"}: ${
+    course.examDate || "Not set"
+  }`;
+
+  renderReadiness(course);
+  renderTabNav();
+  renderActiveTab(course);
+
+  document.getElementById("back-dashboard").addEventListener("click", renderDashboard);
+  document.getElementById("save-class").addEventListener("click", () => saveClass(course, true));
+}
+
+function renderReadiness(course) {
+  const readiness = calculateReadiness(course);
+  document.getElementById("workspace-readiness").innerHTML = `
+    <div class="card">
+      <div class="file-row"><strong>Readiness</strong><span class="badge ${readiness.label.toLowerCase()}">${readiness.label}</span></div>
+      <div class="progress"><span style="width:${readiness.score}%"></span></div>
+      <p class="small-note">Files: ${course.inputs.uploadedFiles.length} • Notes sections: ${countNotes(course.inputs)} • Outputs: ${Object.keys(
+    course.outputs
+  ).length}</p>
+    </div>`;
+}
+
+function renderTabNav() {
+  const tabs = [
+    ["overview", "Overview"],
+    ["materials", "Materials"],
+    ["exam", "Exam Prep"],
+    ["assignment", "Assignments"],
+    ["chat", "Tutor Chat"],
+  ];
+
+  const tabNav = document.getElementById("tab-nav");
+  tabNav.innerHTML = tabs
+    .map(([key, label]) => `<button class="tab-btn ${state.activeTab === key ? "active" : ""}" data-tab="${key}">${label}</button>`)
+    .join("");
+
+  tabNav.querySelectorAll("[data-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeTab = button.dataset.tab;
+      renderWorkspace();
+    });
+  });
+}
+
+function renderActiveTab(course) {
+  const target = document.getElementById("tab-content");
+
+  if (state.activeTab === "overview") {
+    target.innerHTML = `<section class="card"><h3>Overview</h3><p>${nextActionMessage(course)}</p></section>`;
     return;
   }
 
-  const template = document.getElementById("workspace-template");
-  app.innerHTML = "";
-  app.appendChild(template.content.cloneNode(true));
-
-  document.getElementById("workspace-title").textContent = `${course.name} Workspace`;
-  document.getElementById(
-    "workspace-meta"
-  ).textContent = `${course.professor} • Exam: ${course.examDate ? formatDate(course.examDate) : "Not set"}`;
-
-  const materials = document.getElementById("materials");
-  const fileInput = document.getElementById("materials-file");
-  const testStyle = document.getElementById("test-style");
-  const emphasis = document.getElementById("prof-emphasis");
-  const struggles = document.getElementById("struggles");
-  const otherNotes = document.getElementById("other-notes");
-  const output = document.getElementById("output");
-
-  materials.value = course.inputs.materials;
-  testStyle.value = course.inputs.testStyle;
-  emphasis.value = course.inputs.emphasis;
-  struggles.value = course.inputs.struggles;
-  otherNotes.value = course.inputs.otherNotes;
-  output.textContent =
-    course.outputs.studyPlan ||
-    course.outputs.summaryNotes ||
-    course.outputs.practiceQuestions ||
-    "Choose one of the generation buttons to build your support content.";
-
-  document.getElementById("back-btn").addEventListener("click", () => {
-    state.currentClassId = null;
-    renderApp();
-  });
-
-  fileInput.addEventListener("change", async (event) => {
-    const selected = event.target.files[0];
-    if (!selected) return;
-
-    try {
-      const text = await selected.text();
-      const appendText = text.trim();
-      materials.value = materials.value ? `${materials.value}\n\n${appendText}` : appendText;
-      updateCourseInputs(course.id, collectInputs());
-    } catch (error) {
-      alert("Could not read file. Please upload a valid .txt file.");
-      console.error(error);
-    }
-
-    fileInput.value = "";
-  });
-
-  function collectInputs() {
-    return {
-      materials: materials.value.trim(),
-      testStyle: testStyle.value.trim(),
-      emphasis: emphasis.value.trim(),
-      struggles: struggles.value.trim(),
-      otherNotes: otherNotes.value.trim(),
-    };
+  if (state.activeTab === "materials") {
+    target.innerHTML = renderMaterialsTab(course);
+    bindMaterialsTab(course);
+    return;
   }
 
-  document.getElementById("save-notes").addEventListener("click", () => {
-    updateCourseInputs(course.id, collectInputs());
-    alert("Notes saved.");
+  if (state.activeTab === "exam") {
+    target.innerHTML = renderGeneratorsTab(course, "exam");
+    bindGeneratorTab(course);
+    return;
+  }
+
+  if (state.activeTab === "assignment") {
+    target.innerHTML = renderGeneratorsTab(course, "assignment");
+    bindGeneratorTab(course);
+    return;
+  }
+
+  target.innerHTML = renderChatTab(course);
+  bindChatTab(course);
+}
+
+function renderMaterialsTab(course) {
+  return `
+  <section class="tab-panel-grid">
+    <article class="card">
+      <h3>Notes & Inputs</h3>
+      <label>Task Type
+        <select id="task-type">
+          <option value="exam" ${course.taskType === "exam" ? "selected" : ""}>Exam</option>
+          <option value="project" ${course.taskType === "project" ? "selected" : ""}>Project / Assignment</option>
+        </select>
+      </label>
+      <label>Class Materials<textarea id="materials" rows="8">${escapeHtml(course.inputs.materials)}</textarea></label>
+      <label>Previous test style<textarea id="test-style" rows="3">${escapeHtml(course.inputs.testStyle)}</textarea></label>
+      <label>Professor emphasizes<textarea id="emphasis" rows="3">${escapeHtml(course.inputs.emphasis)}</textarea></label>
+      <label>What I struggle with<textarea id="struggles" rows="3">${escapeHtml(course.inputs.struggles)}</textarea></label>
+      <label>Other notes<textarea id="other-notes" rows="3">${escapeHtml(course.inputs.otherNotes)}</textarea></label>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="save-notes">Save Notes</button>
+        <button class="btn btn-ghost" id="clear-notes">Clear Notes</button>
+      </div>
+    </article>
+
+    <article class="card">
+      <h3>Upload Files</h3>
+      <div class="upload-box">
+        <label>Upload .txt and .pdf<input id="upload-input" type="file" accept=".txt,.pdf" multiple /></label>
+        <p class="small-note">PDF text extraction happens in your browser with PDF.js.</p>
+        <p id="upload-status" class="small-note"></p>
+        <ul class="uploaded-files" id="uploaded-list">${renderUploadList(course)}</ul>
+      </div>
+    </article>
+  </section>`;
+}
+
+function bindMaterialsTab(course) {
+  document.getElementById("task-type").addEventListener("change", (event) => {
+    course.taskType = event.target.value;
   });
 
-  document.getElementById("clear-form").addEventListener("click", () => {
-    const confirmed = window.confirm("Clear all text fields for this class? You can still keep class info.");
-    if (!confirmed) return;
+  document.getElementById("save-notes").addEventListener("click", async () => {
+    hydrateInputsFromForm(course);
+    await saveClass(course, true);
+  });
 
-    materials.value = "";
-    testStyle.value = "";
-    emphasis.value = "";
-    struggles.value = "";
-    otherNotes.value = "";
-    output.textContent = "Inputs cleared. Generate new outputs when ready.";
+  document.getElementById("clear-notes").addEventListener("click", async () => {
+    if (!window.confirm("Clear notes?")) return;
+    course.inputs.materials = "";
+    course.inputs.testStyle = "";
+    course.inputs.emphasis = "";
+    course.inputs.struggles = "";
+    course.inputs.otherNotes = "";
+    await saveClass(course, true);
+  });
 
-    const clearedInputs = collectInputs();
-    updateCourseInputs(course.id, clearedInputs);
-    updateCourseOutputs(course.id, {
-      studyPlan: "",
-      summaryNotes: "",
-      practiceQuestions: "",
+  document.getElementById("upload-input").addEventListener("change", async (event) => {
+    const files = Array.from(event.target.files || []);
+    const status = document.getElementById("upload-status");
+    if (!files.length) return;
+
+    status.textContent = "Processing files...";
+    for (const file of files) {
+      const ext = file.name.toLowerCase().split(".").pop();
+      let contentText = "";
+
+      if (ext === "txt") {
+        contentText = await file.text();
+      } else if (ext === "pdf") {
+        try {
+          contentText = await extractPdfText(file);
+        } catch {
+          contentText = "(PDF extraction failed or unreadable.)";
+          status.textContent = "Some PDF text could not be extracted cleanly.";
+        }
+      } else {
+        continue;
+      }
+
+      course.inputs.materials = `${course.inputs.materials}\n\n[${ext.toUpperCase()}: ${file.name}]\n${contentText}`.trim();
+      course.inputs.uploadedFiles.push({ name: file.name, type: ext });
+
+      await apiPost(API.materials, {
+        classId: course.id,
+        fileName: file.name,
+        fileType: ext,
+        contentText,
+      });
+    }
+
+    await saveClass(course, false);
+    renderWorkspace();
+  });
+
+  document.querySelectorAll(".remove-upload").forEach((button) => {
+    button.addEventListener("click", async () => {
+      course.inputs.uploadedFiles.splice(Number(button.dataset.index), 1);
+      await saveClass(course, true);
+    });
+  });
+}
+
+function renderUploadList(course) {
+  if (!course.inputs.uploadedFiles.length) return "<li>No files uploaded yet.</li>";
+
+  return course.inputs.uploadedFiles
+    .map(
+      (file, index) =>
+        `<li class="file-row"><span>${escapeHtml(file.name)} (${file.type})</span><button class="btn btn-danger remove-upload" data-index="${index}">Remove</button></li>`
+    )
+    .join("");
+}
+
+function renderGeneratorsTab(course, section) {
+  const examButtons = `
+    <button class="btn btn-primary" data-gen="studyPlan">Generate Study Plan</button>
+    <button class="btn btn-secondary" data-gen="summaryNotes">Generate Summary Notes</button>
+    <button class="btn btn-secondary" data-gen="practiceQuestions">Generate Practice Questions</button>
+    <button class="btn btn-secondary" data-gen="flashcards">Generate Flashcards</button>`;
+
+  const projectButtons = `
+    <button class="btn btn-primary" data-gen="assignmentSteps">Break Assignment Into Steps</button>
+    <button class="btn btn-secondary" data-gen="workTimeline">Generate Work Timeline</button>
+    <button class="btn btn-secondary" data-gen="deliverables">Create Deliverables Checklist</button>
+    <button class="btn btn-secondary" data-gen="clarifyQuestions">Identify Questions to Clarify</button>`;
+
+  const showExam = section === "exam";
+  const output = state.lastOutput || "Choose a generator.";
+
+  return `
+    <section class="tab-panel-grid">
+      <article class="card">
+        <h3>${showExam ? "Exam Prep" : "Assignment Planner"}</h3>
+        <p class="small-note">Task mode: ${course.taskType === "project" ? "Project / Assignment" : "Exam"}</p>
+        <div class="action-row">${showExam ? examButtons : projectButtons}</div>
+      </article>
+      <article class="card">
+        <h3>Output</h3>
+        <div class="output-box" id="generator-output">${escapeHtml(output)}</div>
+      </article>
+    </section>`;
+}
+
+function bindGeneratorTab(course) {
+  document.querySelectorAll("[data-gen]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      hydrateInputsFromForm(course);
+      const type = button.dataset.gen;
+      const content = generateOutput(type, course);
+      course.outputs[type] = content;
+      state.lastOutput = content;
+
+      await apiPost(API.outputs, {
+        classId: course.id,
+        outputType: type,
+        content,
+      });
+
+      await saveClass(course, false);
+      const out = document.getElementById("generator-output");
+      if (out) out.textContent = content;
+    });
+  });
+}
+
+function generateOutput(type, course) {
+  const i = course.inputs;
+  const topics = extractTopics(i.materials + "\n" + i.struggles + "\n" + i.emphasis);
+  const daysLeft = daysUntil(course.examDate);
+
+  if (type === "studyPlan") {
+    return `Smart Study Plan\nDays left: ${daysLeft}\nRecommended time/day: ${daysLeft <= 4 ? 120 : 75} minutes\n\nHigh priority topics:\n- ${
+      topics.slice(0, 4).join("\n- ") || "Core concepts + weak areas"
+    }\n\nDay-by-day schedule:\n${buildDayPlan(topics, daysLeft, i)}\n\nFinal review day: ${Math.max(1, daysLeft)} (light recap + active recall + confidence pass).`;
+  }
+
+  if (type === "summaryNotes") {
+    return `Summary Notes\n\nKey themes:\n${topics
+      .slice(0, 6)
+      .map((topic, idx) => `${idx + 1}) ${topic}`)
+      .join("\n")}\n\nLikely testable:\n- ${splitPoints(i.emphasis, 4).join("\n- ") || "Definitions, frameworks, applications"}`;
+  }
+
+  if (type === "practiceQuestions") {
+    return `Practice Questions\n1) Conceptual: Explain ${topics[0] || "a key topic"}.\n2) Short answer: Compare ${topics[1] || "topic A"} and ${
+      topics[2] || "topic B"
+    }.\n3) Application: Solve a realistic scenario using ${topics[3] || "class methods"}.`;
+  }
+
+  if (type === "flashcards") {
+    return topics
+      .slice(0, 8)
+      .map((topic, idx) => `Card ${idx + 1}\nFront: ${topic}?\nBack: Define, explain, and give one example.`)
+      .join("\n\n");
+  }
+
+  if (type === "assignmentSteps") {
+    return `Assignment Steps\n1) Clarify rubric\n2) Build outline\n3) Draft core sections\n4) Add evidence/examples\n5) Revise and submit.`;
+  }
+
+  if (type === "workTimeline") {
+    return `Work Timeline\nDays to due date: ${Math.max(1, daysLeft)}\n- 0-30%: planning\n- 30-70%: execution\n- 70-100%: polish + submission checks`;
+  }
+
+  if (type === "deliverables") {
+    return `Deliverables Checklist\n☐ Scope understood\n☐ Outline created\n☐ Draft complete\n☐ QA / proofreading done\n☐ Submitted`; 
+  }
+
+  return `Questions to Clarify\n1) Top grading criteria?\n2) Required format?\n3) Required sources/tools?\n4) Collaboration policy?`;
+}
+
+function buildDayPlan(topics, daysLeft, inputs) {
+  const total = Math.max(1, daysLeft);
+  const style = (inputs.testStyle || "mixed").toLowerCase();
+  const plan = [];
+
+  for (let day = 1; day <= total; day += 1) {
+    const topic = topics[(day - 1) % Math.max(1, topics.length)] || "core topic review";
+    let line = `Day ${day}: ${topic}`;
+    if (day <= Math.ceil(total * 0.4)) line += " (deep understanding + weak-area focus)";
+    else if (day <= Math.ceil(total * 0.8)) line += " (practice questions + recall drills)";
+    else line += " (reinforcement + exam simulation)";
+
+    if (style.includes("concept")) line += " + conceptual explanation drills";
+    if (style.includes("problem") || style.includes("calc")) line += " + problem-solving sets";
+    plan.push(`- ${line}`);
+  }
+
+  return plan.join("\n");
+}
+
+function renderChatTab(course) {
+  return `
+    <section class="tab-panel-grid">
+      <article class="card">
+        <h3>Tutor Chat</h3>
+        <div class="action-row">
+          <button class="btn btn-secondary prompt">Explain this topic simply</button>
+          <button class="btn btn-secondary prompt">Quiz me on this class</button>
+          <button class="btn btn-secondary prompt">What should I focus on next?</button>
+          <button class="btn btn-secondary prompt">Help me break this assignment into steps</button>
+        </div>
+        <div id="chat-log" class="chat-log">${renderChatHistory(course.chatHistory)}</div>
+      </article>
+
+      <article class="card">
+        <h3>Ask</h3>
+        <label>Your message<textarea id="chat-input" rows="7"></textarea></label>
+        <button class="btn btn-primary" id="send-chat">Send</button>
+      </article>
+    </section>`;
+}
+
+function bindChatTab(course) {
+  document.querySelectorAll(".prompt").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.getElementById("chat-input").value = button.textContent;
     });
   });
 
-  document.getElementById("generate-plan").addEventListener("click", () => {
-    const inputs = collectInputs();
-    const plan = generateStudyPlan(course, inputs);
-    updateCourseInputs(course.id, inputs);
-    updateCourseOutputs(course.id, { studyPlan: plan });
-    output.innerHTML = plan;
-  });
+  document.getElementById("send-chat").addEventListener("click", async () => {
+    const input = document.getElementById("chat-input");
+    const message = input.value.trim();
+    if (!message) return;
 
-  document.getElementById("generate-summary").addEventListener("click", () => {
-    const inputs = collectInputs();
-    const summary = generateSummary(course, inputs);
-    updateCourseInputs(course.id, inputs);
-    updateCourseOutputs(course.id, { summaryNotes: summary });
-    output.textContent = summary;
-  });
+    const reply = generateTutorReply(course, message);
+    course.chatHistory.push({ role: "user", message });
+    course.chatHistory.push({ role: "assistant", message: reply });
 
-  document.getElementById("generate-questions").addEventListener("click", () => {
-    const inputs = collectInputs();
-    const questions = generatePracticeQuestions(course, inputs);
-    updateCourseInputs(course.id, inputs);
-    updateCourseOutputs(course.id, { practiceQuestions: questions });
-    output.textContent = questions;
-  });
+    await apiPost(API.chats, {
+      classId: course.id,
+      role: "user",
+      message,
+    });
+    await apiPost(API.chats, {
+      classId: course.id,
+      role: "assistant",
+      message: reply,
+    });
 
-  document.getElementById("copy-output").addEventListener("click", async () => {
-    const textToCopy = output.innerText.trim();
-    if (!textToCopy) {
-      alert("Nothing to copy yet.");
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(textToCopy);
-      alert("Output copied to clipboard.");
-    } catch (error) {
-      console.error(error);
-      alert("Copy failed. Try selecting the text manually.");
-    }
+    await saveClass(course, false);
+    renderWorkspace();
   });
 }
 
-// -------------------------
-// Update helpers
-// -------------------------
-function updateCourseInputs(classId, inputs) {
-  const course = getClassById(classId);
-  if (!course) return;
+function generateTutorReply(course, text) {
+  const q = text.toLowerCase();
+  const topics = extractTopics(course.inputs.materials);
 
-  course.inputs = inputs;
-  course.updatedAt = new Date().toISOString();
-  saveClasses();
+  if (q.includes("quiz")) return `Quick quiz: define ${topics[0] || "a key concept"}, compare with ${topics[1] || "another concept"}, then give one example.`;
+  if (q.includes("focus")) return `Focus next on: ${splitPoints(course.inputs.struggles, 2).join(", ") || "your weakest chapter"
+  }, then review professor priorities: ${splitPoints(course.inputs.emphasis, 2).join(", ") || "core lecture concepts"}.`;
+  if (q.includes("assignment")) return generateOutput("assignmentSteps", course);
+
+  return `Let’s simplify this: start with ${topics[0] || "the core idea"}, connect it to ${topics[1] || "a related topic"}, and test yourself with one short explanation.`;
 }
 
-function updateCourseOutputs(classId, outputChanges) {
-  const course = getClassById(classId);
-  if (!course) return;
-
-  course.outputs = {
-    ...course.outputs,
-    ...outputChanges,
-  };
-  course.updatedAt = new Date().toISOString();
-  saveClasses();
+function renderChatHistory(history) {
+  if (!history.length) return "<p class='small-note'>No messages yet.</p>";
+  return history.map((m) => `<div class='chat-msg ${m.role}'>${escapeHtml(m.message)}</div>`).join("");
 }
 
-// -------------------------
-// Generation logic
-// -------------------------
-function generateStudyPlan(course, inputs) {
-  const daysUntilExam = getDaysUntilExam(course.examDate);
-  const topics = extractTopics(inputs.materials);
-  const emphasisPoints = splitToBullets(inputs.emphasis, 3);
-  const strugglePoints = splitToBullets(inputs.struggles, 3);
-  const testStyle = inputs.testStyle || "mixed conceptual and short-answer questions";
+async function saveClass(course, rerender) {
+  hydrateInputsFromForm(course);
+  const result = await apiPut(`${API.classes}/${course.id}`, {
+    className: course.name,
+    professor: course.professor,
+    examDate: course.examDate,
+    taskType: course.taskType,
+    tag: course.tag,
+    inputs: course.inputs,
+    outputs: course.outputs,
+  });
 
-  const timelineText =
-    daysUntilExam > 1
-      ? `${daysUntilExam} days remaining before the exam.`
-      : daysUntilExam === 1
-      ? "1 day remaining before the exam."
-      : "Exam date is today or passed—focus on rapid review and recall drills.";
+  if (!result.ok) return alert(result.error || "Failed to save class.");
+  if (rerender) renderWorkspace();
+}
 
-  const checklist = [
-    `Review high-yield themes: ${topics.slice(0, 4).join(", ") || "course definitions, key frameworks, and examples"}.`,
-    `Prioritize professor emphasis: ${emphasisPoints.join(" | ") || "focus areas not provided yet"}.`,
-    `Target weak areas: ${strugglePoints.join(" | ") || "identify at least 2 weak topics to drill"}.`,
-    `Practice in likely format: ${testStyle}.`,
-    "End each study session with a 10-minute recall quiz without notes.",
+function hydrateInputsFromForm(course) {
+  const materials = document.getElementById("materials");
+  if (!materials) return;
+  course.inputs.materials = materials.value.trim();
+  course.inputs.testStyle = document.getElementById("test-style").value.trim();
+  course.inputs.emphasis = document.getElementById("emphasis").value.trim();
+  course.inputs.struggles = document.getElementById("struggles").value.trim();
+  course.inputs.otherNotes = document.getElementById("other-notes").value.trim();
+  course.taskType = document.getElementById("task-type").value;
+}
+
+function calculateReadiness(course) {
+  const checks = [
+    course.inputs.uploadedFiles.length > 0,
+    countNotes(course.inputs) >= 2,
+    Boolean(course.outputs.studyPlan),
+    Boolean(course.outputs.practiceQuestions),
+    Boolean(course.outputs.flashcards),
+    Boolean(course.outputs.assignmentSteps || course.outputs.workTimeline),
   ];
-
-  return `
-<h4>Personalized Study Plan for ${escapeHtml(course.name)}</h4>
-<p><strong>Timeline:</strong> ${escapeHtml(timelineText)}</p>
-<p><strong>Priority Strategy:</strong> Start with professor-priority material, then reinforce weaker areas, and finish with timed practice.</p>
-<ul class="progress-list">
-  ${checklist.map((item) => `<li>☐ ${escapeHtml(item)}</li>`).join("")}
-</ul>
-<p><strong>Suggested Flow:</strong></p>
-<p>1) Warm-up review (20 min) → 2) Focus block on key topics (45 min) → 3) Practice questions (25 min) → 4) Quick summary rewrite (10 min).</p>
-`;
+  const score = Math.round((checks.filter(Boolean).length / checks.length) * 100);
+  return { score, label: score >= 70 ? "High" : score >= 40 ? "Medium" : "Low" };
 }
 
-function generateSummary(course, inputs) {
-  const topics = extractTopics(inputs.materials);
-  const emphasisPoints = splitToBullets(inputs.emphasis, 4);
-  const testStyle = inputs.testStyle || "mixed question types";
-  const struggles = splitToBullets(inputs.struggles, 3);
-
-  return `Summary Notes: ${course.name}
-
-1) Key Themes Identified
-- ${topics[0] || "Core course definitions and vocabulary"}
-- ${topics[1] || "Major models, theories, or frameworks"}
-- ${topics[2] || "Comparisons between similar concepts"}
-- ${topics[3] || "Applications and examples"}
-
-2) Professor Emphasis
-- ${emphasisPoints[0] || "Foundational principles"}
-- ${emphasisPoints[1] || "Concept clarity"}
-- ${emphasisPoints[2] || "Real-world interpretation"}
-- ${emphasisPoints[3] || "Common pitfalls"}
-
-3) Test Preparation Focus
-- Expected style: ${testStyle}
-- Spend extra time on: ${struggles.join(", ") || "your weakest unit and one high-priority concept"}
-- Build one-page sheet of terms, formulas, and examples for final review.`;
+function countNotes(inputs) {
+  return [inputs.materials, inputs.testStyle, inputs.emphasis, inputs.struggles, inputs.otherNotes].filter((x) => x?.trim()).length;
 }
 
-function generatePracticeQuestions(course, inputs) {
-  const topics = extractTopics(inputs.materials);
-  const testStyle = inputs.testStyle || "short-answer and conceptual reasoning";
-  const struggles = splitToBullets(inputs.struggles, 2);
-
-  return `Practice Questions: ${course.name}
-Likely test style: ${testStyle}
-
-Conceptual Questions
-1) Explain the main idea behind "${topics[0] || "the core concept from this unit"}" in your own words.
-2) Compare and contrast "${topics[1] || "two important theories"}" and "${topics[2] || "a related framework"}".
-3) Why might a professor emphasize "${topics[3] || "foundational definitions"}" before advanced topics?
-
-Short-Answer Questions
-4) Define "${topics[0] || "a key term"}" and give one concrete example.
-5) Write a 4-6 sentence response to a scenario involving "${topics[1] || "a commonly tested concept"}".
-6) List two mistakes students make on this topic and how to avoid them.
-
-Weak-Area Drill
-7) Create a mini flashcard set for: ${struggles.join(" and ") || "your most difficult concepts"}.
-8) Teach one difficult topic aloud in under 60 seconds without notes.`;
+function nextActionMessage(course) {
+  const r = calculateReadiness(course);
+  if (r.label === "Low") return "Add materials and generate your first plan.";
+  if (r.label === "Medium") return "Generate missing outputs and run a tutor quiz.";
+  return "Great job. Keep reinforcing weak areas with active recall.";
 }
 
-// -------------------------
-// Utility helpers
-// -------------------------
-function formatDate(dateString) {
-  if (!dateString) return "No date";
+function extractTopics(text) {
+  if (!text.trim()) return [];
+  const parts = text
+    .split(/\n|\.|,|;/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 4)
+    .slice(0, 12);
 
-  const date = new Date(`${dateString}T00:00:00`);
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  const unique = [];
+  for (const part of parts) {
+    const norm = part.toLowerCase();
+    if (!unique.some((item) => item.toLowerCase() === norm)) unique.push(part);
+  }
+  return unique;
 }
 
-function getDaysUntilExam(dateString) {
-  if (!dateString) return 0;
-
-  const today = new Date();
-  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const exam = new Date(`${dateString}T00:00:00`);
-  const diff = exam - start;
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-
-function escapeHtml(text) {
+function splitPoints(text, max) {
+  if (!text.trim()) return [];
   return text
+    .split(/\n|\.|,|;/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, max);
+}
+
+async function extractPdfText(file) {
+  if (!window.pdfjsLib) throw new Error("PDF.js unavailable");
+  const bytes = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+  let text = "";
+  for (let page = 1; page <= pdf.numPages; page += 1) {
+    const p = await pdf.getPage(page);
+    const c = await p.getTextContent();
+    text += `\n[Page ${page}] ${c.items.map((item) => ("str" in item ? item.str : "")).join(" ")}`;
+  }
+  return text;
+}
+
+function daysUntil(date) {
+  if (!date) return 0;
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(`${date}T00:00:00`);
+  return Math.max(0, Math.ceil((end - start) / 86400000));
+}
+
+function escapeHtml(value) {
+  return String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -423,42 +701,55 @@ function escapeHtml(text) {
     .replaceAll("'", "&#39;");
 }
 
-function extractTopics(text) {
-  if (!text.trim()) return [];
-
-  // Very simple placeholder topic extraction for version 1.
-  const chunks = text
-    .split(/\n|\.|;|,/)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 4);
-
-  const unique = [];
-  for (const chunk of chunks) {
-    const cleaned = chunk.replace(/^[-*\d)\s]+/, "").trim();
-    const normalized = cleaned.toLowerCase();
-    if (cleaned && !unique.some((item) => item.toLowerCase() === normalized)) {
-      unique.push(cleaned);
-    }
-    if (unique.length >= 8) break;
-  }
-
-  return unique;
-}
-
-function splitToBullets(text, max = 4) {
-  if (!text.trim()) return [];
-
-  return text
-    .split(/\n|\.|,|;/)
-    .map((piece) => piece.trim())
-    .filter(Boolean)
-    .slice(0, max);
-}
-
 function pickTagColor(tag) {
-  const palette = ["#4459ff", "#0f766e", "#b45309", "#7c3aed", "#db2777", "#0284c7"];
+  const palette = ["#4f46e5", "#0f766e", "#0284c7", "#9333ea", "#db2777", "#b45309"];
   if (!tag) return palette[0];
+  const sum = tag.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  return palette[sum % palette.length];
+}
 
-  const total = tag.split("").reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return palette[total % palette.length];
+async function apiGet(url) {
+  try {
+    const response = await fetch(url, { credentials: "include" });
+    return await response.json();
+  } catch {
+    return { ok: false, error: "Network error" };
+  }
+}
+
+async function apiPost(url, body) {
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return await response.json();
+  } catch {
+    return { ok: false, error: "Network error" };
+  }
+}
+
+async function apiPut(url, body) {
+  try {
+    const response = await fetch(url, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return await response.json();
+  } catch {
+    return { ok: false, error: "Network error" };
+  }
+}
+
+async function apiDelete(url) {
+  try {
+    const response = await fetch(url, { method: "DELETE", credentials: "include" });
+    return await response.json();
+  } catch {
+    return { ok: false, error: "Network error" };
+  }
 }

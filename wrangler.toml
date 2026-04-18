@@ -5,4 +5,4 @@ pages_build_output_dir = "."
 [[d1_databases]]
 binding = "DB"
 database_name = "studyflow-db"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "1daf2857-7a8e-4831-9a07-c169625ab553"

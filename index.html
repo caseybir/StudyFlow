@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>StudyFlow | AI Study Helper</title>
+    <title>StudyFlow | AI Academic Dashboard</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -14,23 +14,25 @@
   </head>
   <body>
     <div class="app-shell">
-      <header class="topbar">
-        <div>
-          <h1>StudyFlow</h1>
-          <p class="subtitle">Plan smarter. Study calmer. Perform better.</p>
-        </div>
-      </header>
+      <aside class="sidebar card">
+        <h1>StudyFlow</h1>
+        <p class="subtitle">AI-powered academic dashboard</p>
+        <ul class="sidebar-list">
+          <li>📚 Class Workspaces</li>
+          <li>🧠 Exam Prep + Assignments</li>
+          <li>💬 Tutor Chat</li>
+          <li>📈 Readiness Tracking</li>
+        </ul>
+      </aside>
 
-      <main id="app"></main>
+      <main id="app" class="main-view"></main>
     </div>
 
     <template id="dashboard-template">
       <section class="dashboard-header card">
         <div>
-          <h2>Your AI Study Dashboard</h2>
-          <p>
-            Manage classes, track exam dates or assignment timelines, and generate personalized study support from your notes.
-          </p>
+          <h2>Dashboard</h2>
+          <p>Manage your classes, track readiness, and launch focused workspaces.</p>
         </div>
         <button id="open-add-class" class="btn btn-primary">+ Add New Class</button>
       </section>
@@ -38,14 +40,8 @@
       <section class="card add-class hidden" id="add-class-panel">
         <h3>Add Class</h3>
         <form id="class-form" class="grid-form">
-          <label>
-            Class Name
-            <input type="text" name="name" placeholder="e.g., Introduction to Psychology" required />
-          </label>
-          <label>
-            Professor Name
-            <input type="text" name="professor" placeholder="e.g., Dr. Martinez" required />
-          </label>
+          <label>Class Name <input type="text" name="name" required /></label>
+          <label>Professor Name <input type="text" name="professor" required /></label>
           <label>
             Task Type
             <select name="taskType" required>
@@ -53,17 +49,11 @@
               <option value="project">Project / Assignment</option>
             </select>
           </label>
-          <label>
-            Due Date / Exam Date
-            <input type="date" name="examDate" required />
-          </label>
-          <label>
-            Course Tag / Color (optional)
-            <input type="text" name="tag" placeholder="e.g., Blue, STEM, Midterm 1" />
-          </label>
+          <label>Next Due / Exam Date <input type="date" name="examDate" required /></label>
+          <label>Course Tag / Color <input type="text" name="tag" placeholder="optional" /></label>
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Save Class</button>
-            <button type="button" id="cancel-add-class" class="btn btn-ghost">Cancel</button>
+            <button class="btn btn-primary" type="submit">Save Class</button>
+            <button class="btn btn-ghost" type="button" id="cancel-add-class">Cancel</button>
           </div>
         </form>
       </section>
@@ -76,83 +66,21 @@
 
     <template id="workspace-template">
       <section class="workspace-header card">
-        <button id="back-btn" class="btn btn-ghost">← Back to Dashboard</button>
-        <div>
-          <h2 id="workspace-title"></h2>
-          <p id="workspace-meta"></p>
+        <div class="workspace-title-wrap">
+          <button id="back-btn" class="btn btn-ghost">← Dashboard</button>
+          <div>
+            <h2 id="workspace-title"></h2>
+            <p id="workspace-meta"></p>
+          </div>
         </div>
+        <div id="overview-readiness"></div>
       </section>
 
-      <section class="workspace-layout">
-        <div class="card notes-card">
-          <h3>Class Inputs</h3>
-          <p class="small-note">Tip: Save often. Your notes are stored in your browser via localStorage.</p>
-
-          <label>
-            Task Type
-            <select id="task-type">
-              <option value="exam">Exam</option>
-              <option value="project">Project / Assignment</option>
-            </select>
-          </label>
-
-          <label>
-            Class Materials
-            <textarea id="materials" rows="8" placeholder="Paste syllabus text, readings, lecture highlights, project instructions, etc."></textarea>
-          </label>
-
-          <div class="upload-panel">
-            <label class="upload-label">
-              Upload files
-              <input type="file" id="materials-file" accept=".txt,.pdf" multiple />
-              <span class="small-note">Supported files: .txt and .pdf</span>
-            </label>
-            <p id="upload-status" class="upload-status"></p>
-            <div>
-              <p class="small-note upload-list-title">Uploaded files</p>
-              <ul id="uploaded-files" class="uploaded-files"></ul>
-            </div>
-          </div>
-
-          <label>
-            What previous tests have been like
-            <textarea id="test-style" rows="4" placeholder="e.g., heavy on short answers and case scenarios"></textarea>
-          </label>
-
-          <label>
-            What the professor emphasizes
-            <textarea id="prof-emphasis" rows="4" placeholder="e.g., definitions, comparing theories, practical examples"></textarea>
-          </label>
-
-          <label>
-            What I struggle with
-            <textarea id="struggles" rows="4" placeholder="e.g., remembering formulas, timelines, or applying concepts"></textarea>
-          </label>
-
-          <label>
-            Other notes
-            <textarea id="other-notes" rows="4" placeholder="Anything else to help your study assistant personalize support"></textarea>
-          </label>
-
-          <div class="form-actions wrap">
-            <button id="save-notes" class="btn btn-primary">Save Notes</button>
-            <button id="clear-form" class="btn btn-ghost">Clear Form</button>
-          </div>
-        </div>
-
-        <div class="card output-card">
-          <h3>AI Study Support (Version 1 Placeholder)</h3>
-          <div class="action-row">
-            <button id="generate-plan" class="btn btn-primary"></button>
-            <button id="generate-summary" class="btn btn-secondary"></button>
-            <button id="generate-questions" class="btn btn-secondary"></button>
-          </div>
-          <div class="action-row">
-            <button id="copy-output" class="btn btn-ghost">Copy Output</button>
-          </div>
-          <div id="output" class="output-panel"></div>
-        </div>
+      <section class="tabs card">
+        <div class="tab-nav" id="tab-nav"></div>
       </section>
+
+      <section id="tab-content"></section>
     </template>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.min.js"></script>

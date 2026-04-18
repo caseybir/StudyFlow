@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StudyFlow | AI Study Helper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>StudyFlow</h1>
+          <p class="subtitle">Plan smarter. Study calmer. Perform better.</p>
+        </div>
+      </header>
+
+      <main id="app"></main>
+    </div>
+
+    <template id="dashboard-template">
+      <section class="dashboard-header card">
+        <div>
+          <h2>Your AI Study Dashboard</h2>
+          <p>
+            Manage classes, track exam dates, and generate personalized study support from your notes.
+          </p>
+        </div>
+        <button id="open-add-class" class="btn btn-primary">+ Add New Class</button>
+      </section>
+
+      <section class="card add-class hidden" id="add-class-panel">
+        <h3>Add Class</h3>
+        <form id="class-form" class="grid-form">
+          <label>
+            Class Name
+            <input type="text" name="name" placeholder="e.g., Introduction to Psychology" required />
+          </label>
+          <label>
+            Professor Name
+            <input type="text" name="professor" placeholder="e.g., Dr. Martinez" required />
+          </label>
+          <label>
+            Exam Date
+            <input type="date" name="examDate" required />
+          </label>
+          <label>
+            Course Tag / Color (optional)
+            <input type="text" name="tag" placeholder="e.g., Blue, STEM, Midterm 1" />
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save Class</button>
+            <button type="button" id="cancel-add-class" class="btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <h3 class="section-title">Your Classes</h3>
+        <div id="class-grid" class="class-grid"></div>
+      </section>
+    </template>
+
+    <template id="workspace-template">
+      <section class="workspace-header card">
+        <button id="back-btn" class="btn btn-ghost">← Back to Dashboard</button>
+        <div>
+          <h2 id="workspace-title"></h2>
+          <p id="workspace-meta"></p>
+        </div>
+      </section>
+
+      <section class="workspace-layout">
+        <div class="card notes-card">
+          <h3>Class Inputs</h3>
+          <p class="small-note">Tip: Save often. Your notes are stored in your browser via localStorage.</p>
+
+          <label>
+            Class Materials
+            <textarea id="materials" rows="8" placeholder="Paste syllabus text, readings, lecture highlights, etc."></textarea>
+          </label>
+
+          <label class="upload-label">
+            Upload .txt File
+            <input type="file" id="materials-file" accept=".txt" />
+            <span class="small-note">Uploaded text will be appended to Class Materials.</span>
+          </label>
+
+          <label>
+            What previous tests have been like
+            <textarea id="test-style" rows="4" placeholder="e.g., heavy on short answers and case scenarios"></textarea>
+          </label>
+
+          <label>
+            What the professor emphasizes
+            <textarea id="prof-emphasis" rows="4" placeholder="e.g., definitions, comparing theories, practical examples"></textarea>
+          </label>
+
+          <label>
+            What I struggle with
+            <textarea id="struggles" rows="4" placeholder="e.g., remembering formulas, timelines, or applying concepts"></textarea>
+          </label>
+
+          <label>
+            Other notes
+            <textarea id="other-notes" rows="4" placeholder="Anything else to help your study assistant personalize support"></textarea>
+          </label>
+
+          <div class="form-actions wrap">
+            <button id="save-notes" class="btn btn-primary">Save Notes</button>
+            <button id="clear-form" class="btn btn-ghost">Clear Form</button>
+          </div>
+        </div>
+
+        <div class="card output-card">
+          <h3>AI Study Support (Version 1 Placeholder)</h3>
+          <div class="action-row">
+            <button id="generate-plan" class="btn btn-primary">Generate Study Plan</button>
+            <button id="generate-summary" class="btn btn-secondary">Generate Summary Notes</button>
+            <button id="generate-questions" class="btn btn-secondary">Generate Practice Questions</button>
+          </div>
+          <div class="action-row">
+            <button id="copy-output" class="btn btn-ghost">Copy Output</button>
+          </div>
+          <div id="output" class="output-panel"></div>
+        </div>
+      </section>
+    </template>
+
+    <script src="script.js"></script>
+  </body>
+</html>

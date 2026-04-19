@@ -1,4 +1,4 @@
-const STORAGE_KEY = "studyflow_v2";
+const STORAGE_KEY = "studyflow_v3";
 const app = document.getElementById("app");
 const topNav = document.getElementById("top-nav");
 const modal = document.getElementById("item-modal");
@@ -9,37 +9,77 @@ if (window.pdfjsLib) {
 }
 
 const state = {
-  data: loadData(),
   activeView: "dashboard",
   monthCursor: new Date(),
-  addPendingFiles: [],
-  selectedStudyTaskId: null,
-  selectedToolKey: null,
+  selectedDateISO: toISO(new Date()),
+  selectedStudyItemId: null,
+  selectedTool: null,
+  pendingFiles: [],
+  items: loadItems(),
 };
 
 render();
 
-function loadData() {
+function loadItems() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    console.error(e);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(normalizeItem) : [];
+  } catch (error) {
+    console.error("Failed to load localStorage data", error);
+    return [];
   }
-  return { tasks: [], classes: {}, materials: {}, outputs: {}, analysis: {}, plans: {}, calendarEvents: [], chats: {} };
 }
 
-function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+function normalizeItem(item) {
+  return {
+    id: item.id || crypto.randomUUID(),
+    title: item.title || "Untitled",
+    className: item.className || "Unassigned",
+    professor: item.professor || "",
+    type: (item.type || "assignment").toLowerCase(),
+    dueDate: item.dueDate || toISO(addDays(new Date(), 7)),
+    priority: (item.priority || "medium").toLowerCase(),
+    notes: item.notes || "",
+    uploadedFiles: Array.isArray(item.uploadedFiles) ? item.uploadedFiles : [],
+    extractedText: item.extractedText || "",
+    generatedPlan: item.generatedPlan || defaultPlan(item.type || "assignment"),
+    calendarEvents: Array.isArray(item.calendarEvents) ? item.calendarEvents : [],
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || new Date().toISOString(),
+  };
+}
+
+function defaultPlan(type) {
+  const planType = String(type).toLowerCase();
+  if (planType === "exam") return { startDate: "", studyDays: [] };
+  return { startDate: "", steps: [] };
+}
+
+function persistItems() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.items));
+}
+
+function setItems(nextItems) {
+  const deduped = [];
+  const seen = new Set();
+  for (const item of nextItems.map(normalizeItem)) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    deduped.push(item);
+  }
+  state.items = deduped;
+  persistItems();
 }
 
 function render() {
   renderTopNav();
-  if (state.activeView === "dashboard") return renderDashboard();
-  if (state.activeView === "calendar") return renderCalendar();
-  if (state.activeView === "add") return renderAdd();
-  if (state.activeView === "classes") return renderClasses();
-  renderStudyTools();
+  if (state.activeView === "dashboard") renderDashboard();
+  if (state.activeView === "calendar") renderCalendar();
+  if (state.activeView === "classes") renderClasses();
+  if (state.activeView === "study") renderStudyTools();
+  if (state.activeView === "add") renderAddForm();
 }
 
 function renderTopNav() {
@@ -52,325 +92,287 @@ function renderTopNav() {
   ];
   topNav.innerHTML = tabs
     .map(([key, label]) => {
-      const className = ["btn", state.activeView === key ? "tab-active" : "btn-ghost", key === "add" ? "btn-addnew" : ""].join(" ");
-      return `<button class="${className}" data-view="${key}">${label}</button>`;
+      const classes = ["btn", state.activeView === key ? "tab-active" : "btn-ghost", key === "add" ? "btn-addnew" : ""]
+        .filter(Boolean)
+        .join(" ");
+      return `<button class="${classes}" data-view="${key}">${label}</button>`;
     })
     .join("");
 
-  topNav.querySelectorAll("[data-view]").forEach((b) => b.addEventListener("click", () => {
-    state.activeView = b.dataset.view;
-    render();
-  }));
+  topNav.querySelectorAll("[data-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeView = button.dataset.view;
+      render();
+    });
+  });
 }
 
 function renderDashboard() {
   app.innerHTML = "";
   app.appendChild(document.getElementById("dashboard-view").content.cloneNode(true));
 
-  const tasks = sortedByDate(state.data.tasks);
-  const upcoming = tasks.filter((t) => daysUntil(t.dueDate) >= 0).slice(0, 8);
-  const high = tasks.filter((t) => t.priority === "High").slice(0, 6);
+  const items = sortedByDueDate(state.items);
+  const upcoming = items.filter((item) => daysUntil(item.dueDate) >= 0).slice(0, 8);
+  const highPriority = items.filter((item) => item.priority === "high").slice(0, 8);
+  const recentUploads = collectRecentUploads().slice(0, 8);
 
   const stats = [
-    ["Total Items", tasks.length],
-    ["Upcoming Exams", tasks.filter((t) => t.type === "Exam" && daysUntil(t.dueDate) >= 0).length],
-    ["Upcoming Projects", tasks.filter((t) => t.type === "Project" && daysUntil(t.dueDate) >= 0).length],
-    ["Upcoming Assignments", tasks.filter((t) => t.type === "Assignment" && daysUntil(t.dueDate) >= 0).length],
-    ["Due This Week", tasks.filter((t) => daysUntil(t.dueDate) <= 7 && daysUntil(t.dueDate) >= 0).length],
+    ["Total Items", items.length],
+    ["Upcoming Exams", items.filter((item) => item.type === "exam" && daysUntil(item.dueDate) >= 0).length],
+    ["Upcoming Projects", items.filter((item) => item.type === "project" && daysUntil(item.dueDate) >= 0).length],
+    ["Upcoming Assignments", items.filter((item) => item.type === "assignment" && daysUntil(item.dueDate) >= 0).length],
+    ["Due This Week", items.filter((item) => daysUntil(item.dueDate) >= 0 && daysUntil(item.dueDate) <= 7).length],
   ];
 
   document.getElementById("stats-grid").innerHTML = stats
     .map(([label, value]) => `<article class="card stat-card"><h4>${label}</h4><p>${value}</p></article>`)
     .join("");
 
-  document.getElementById("upcoming-list").innerHTML = renderTaskRows(upcoming, "No upcoming deadlines yet.");
-  document.getElementById("priority-list").innerHTML = renderTaskRows(high, "No high-priority items yet.");
-
-  const recent = allMaterials().sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)).slice(0, 6);
-  document.getElementById("recent-uploads").innerHTML = recent.length
-    ? recent
+  document.getElementById("upcoming-list").innerHTML = renderItemRows(upcoming, "No upcoming deadlines.");
+  document.getElementById("priority-list").innerHTML = renderItemRows(highPriority, "No high-priority items.");
+  document.getElementById("recent-uploads").innerHTML = recentUploads.length
+    ? recentUploads
         .map(
-          (m) => `<article class="item-row" data-task-id="${m.taskId}"><div><strong>${escapeHtml(m.fileName)}</strong><small>${escapeHtml(
-            m.taskTitle
-          )} • ${escapeHtml(m.className)}</small></div><span class="chevron">›</span></article>`
+          (upload) => `<article class="item-row" data-item-id="${upload.itemId}">
+              <div>
+                <strong>${escapeHtml(upload.fileName)}</strong>
+                <small>${escapeHtml(upload.itemTitle)} • ${escapeHtml(upload.className)} • ${formatDate(upload.uploadedAt.slice(0, 10))}</small>
+              </div>
+              <span class="chevron">›</span>
+            </article>`
         )
         .join("")
-    : `<p class="muted">Upload a PDF or TXT to populate this section.</p>`;
+    : `<p class="muted">No uploads yet. Add an item with PDF or TXT files.</p>`;
 
-  app.querySelectorAll("[data-nav]").forEach((b) => b.addEventListener("click", () => {
-    state.activeView = b.dataset.nav;
-    render();
-  }));
-
-  bindTaskClicks();
-}
-
-function renderCalendar() {
-  app.innerHTML = "";
-  app.appendChild(document.getElementById("calendar-view").content.cloneNode(true));
-
-  const y = state.monthCursor.getFullYear();
-  const m = state.monthCursor.getMonth();
-  const start = new Date(y, m, 1);
-  const end = new Date(y, m + 1, 0);
-  const first = start.getDay();
-
-  document.getElementById("calendar-title").textContent = start.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-
-  const cells = [];
-  for (let i = 0; i < first; i += 1) cells.push(calendarCell(new Date(y, m, i - first + 1), true));
-  for (let day = 1; day <= end.getDate(); day += 1) cells.push(calendarCell(new Date(y, m, day), false));
-  while (cells.length % 7 !== 0) cells.push(calendarCell(new Date(y, m + 1, cells.length - (first + end.getDate()) + 1), true));
-  document.getElementById("calendar-grid").innerHTML = cells.join("");
-
-  const upcomingEvents = sortedByDate(getAllCalendarEvents()).filter((e) => daysUntil(e.date) >= 0).slice(0, 12);
-  document.getElementById("calendar-upcoming").innerHTML = renderEventRows(upcomingEvents, "No upcoming events.");
-  document.getElementById("day-events").innerHTML = `<p class="muted">Click a day to see all events.</p>`;
-
-  document.getElementById("prev-month").addEventListener("click", () => {
-    state.monthCursor = new Date(y, m - 1, 1);
-    renderCalendar();
-  });
-  document.getElementById("next-month").addEventListener("click", () => {
-    state.monthCursor = new Date(y, m + 1, 1);
-    renderCalendar();
-  });
-
-  app.querySelectorAll(".cal-cell").forEach((cell) => {
-    cell.addEventListener("click", () => {
-      const dayEvents = getAllCalendarEvents().filter((e) => e.date === cell.dataset.date);
-      document.getElementById("day-events").innerHTML = renderEventRows(dayEvents, "No events for this day.");
-      bindEventClicks();
+  app.querySelectorAll("[data-nav]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeView = button.dataset.nav;
+      render();
     });
   });
 
-  bindEventClicks();
+  bindItemClicks();
 }
 
-function calendarCell(date, outside) {
-  const iso = toISO(date);
-  const events = getAllCalendarEvents().filter((e) => e.date === iso).slice(0, 3);
-  return `<article class="cal-cell ${outside ? "outside" : ""}" data-date="${iso}"><div class="cal-day">${date.getDate()}</div>${events
-    .map((e) => `<div class="cal-item ${e.colorClass}">${escapeHtml(e.title)}</div>`)
-    .join("")}</article>`;
-}
-
-function renderAdd() {
+function renderAddForm(prefillItem = null) {
   app.innerHTML = "";
   app.appendChild(document.getElementById("add-view").content.cloneNode(true));
-  state.addPendingFiles = [];
 
+  const form = document.getElementById("add-form");
+  const fileInput = document.getElementById("add-files");
   const status = document.getElementById("add-upload-status");
-  const list = document.getElementById("add-upload-list");
+  const uploadList = document.getElementById("add-upload-list");
+  const resetButton = document.getElementById("reset-add");
 
-  document.getElementById("add-files").addEventListener("change", async (e) => {
-    const files = Array.from(e.target.files || []);
+  state.pendingFiles = [];
+
+  if (prefillItem) {
+    form.title.value = prefillItem.title;
+    form.className.value = prefillItem.className;
+    form.professor.value = prefillItem.professor || "";
+    form.type.value = prefillItem.type;
+    form.dueDate.value = prefillItem.dueDate;
+    form.priority.value = prefillItem.priority;
+    form.notes.value = prefillItem.notes || "";
+    state.pendingFiles = [...prefillItem.uploadedFiles];
+    uploadList.innerHTML = state.pendingFiles
+      .map((file) => `<li>${escapeHtml(file.fileName)} (${file.fileType.toUpperCase()})</li>`)
+      .join("");
+    status.textContent = "Loaded existing files. You can add more.";
+  }
+
+  fileInput.addEventListener("change", async (event) => {
+    const files = Array.from(event.target.files || []);
     if (!files.length) return;
-    status.textContent = "Reading and analyzing files...";
+    status.textContent = "Processing files...";
 
     for (const file of files) {
       const ext = getExt(file.name);
-      if (!["txt", "pdf"].includes(ext)) continue;
-      let text = "";
-      let failed = false;
-      if (ext === "txt") text = await file.text();
-      else {
+      if (!["pdf", "txt"].includes(ext)) continue;
+
+      let extracted = "";
+      let extractionError = "";
+      if (ext === "txt") {
+        extracted = await file.text();
+      } else {
         try {
-          text = await extractPdfText(file);
-        } catch {
-          failed = true;
-          text = "(PDF extraction failed.)";
+          extracted = await extractPdfText(file);
+        } catch (error) {
+          extractionError = "We could not extract text from this PDF. The item can still be saved.";
+          console.error("PDF extraction failed", error);
         }
       }
-      state.addPendingFiles.push({ id: crypto.randomUUID(), fileName: file.name, fileType: ext, text, failed, uploadedAt: new Date().toISOString() });
+
+      state.pendingFiles.push({
+        id: crypto.randomUUID(),
+        fileName: file.name,
+        fileType: ext,
+        text: extracted,
+        uploadedAt: new Date().toISOString(),
+        extractionError,
+      });
     }
 
-    status.textContent = `Prepared ${state.addPendingFiles.length} file(s).`;
-    list.innerHTML = state.addPendingFiles.map((f) => `<li>${escapeHtml(f.fileName)} ${f.failed ? "(limited extraction)" : ""}</li>`).join("");
+    uploadList.innerHTML = state.pendingFiles
+      .map(
+        (file) => `<li>${escapeHtml(file.fileName)} (${file.fileType.toUpperCase()}) ${
+          file.extractionError ? `<span class="priority high">- ${escapeHtml(file.extractionError)}</span>` : ""
+        }</li>`
+      )
+      .join("");
+    status.textContent = `${state.pendingFiles.length} file(s) ready.`;
+    fileInput.value = "";
   });
 
-  document.getElementById("reset-add").addEventListener("click", () => renderAdd());
+  resetButton.addEventListener("click", () => renderAddForm(prefillItem));
 
-  document.getElementById("add-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const form = Object.fromEntries(new FormData(e.target));
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const formData = Object.fromEntries(new FormData(form));
 
-    const task = {
-      id: crypto.randomUUID(),
-      title: form.title.trim(),
-      className: form.className.trim(),
-      professor: (form.professor || "").trim(),
-      type: form.type,
-      dueDate: form.dueDate,
-      priority: form.priority,
-      notes: (form.notes || "").trim(),
-      createdAt: new Date().toISOString(),
+    if (!formData.title.trim() || !formData.className.trim() || !formData.dueDate) {
+      status.textContent = "Please fill in title, class name, and due date.";
+      return;
+    }
+
+    const baseItem = {
+      id: prefillItem ? prefillItem.id : crypto.randomUUID(),
+      title: formData.title.trim(),
+      className: formData.className.trim(),
+      professor: (formData.professor || "").trim(),
+      type: formData.type.toLowerCase(),
+      dueDate: formData.dueDate,
+      priority: formData.priority.toLowerCase(),
+      notes: (formData.notes || "").trim(),
+      uploadedFiles: state.pendingFiles,
+      extractedText: state.pendingFiles.map((file) => file.text || "").join("\n\n").trim(),
+      createdAt: prefillItem ? prefillItem.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    state.data.tasks.push(task);
-    if (!state.data.classes[task.className]) state.data.classes[task.className] = [];
-    state.data.classes[task.className].push(task.id);
+    baseItem.generatedPlan = generatePlan(baseItem);
+    baseItem.calendarEvents = buildCalendarEvents(baseItem);
 
-    state.data.materials[task.id] = [...state.addPendingFiles];
-    const analysis = analyzeStudyMaterial(`${task.notes}\n${state.addPendingFiles.map((f) => f.text).join("\n")}`);
-    state.data.analysis[task.id] = analysis;
-
-    const plan = buildStructuredPlan(task, analysis);
-    state.data.plans[task.id] = plan;
-    state.data.outputs[task.id] = autoGenerateOutputs(task, analysis, plan);
-
-    updateCalendarEventsForTask(task.id);
-    state.data.chats[task.id] = [];
-    persist();
+    if (prefillItem) {
+      setItems(state.items.map((item) => (item.id === baseItem.id ? baseItem : item)));
+      closeModal();
+    } else {
+      setItems([...state.items, baseItem]);
+    }
 
     state.activeView = "dashboard";
     render();
   });
 }
 
-function buildStructuredPlan(task, analysis) {
-  if (task.type === "Project") return buildProjectPlan(task, analysis);
-  if (task.type === "Assignment") return buildAssignmentPlan(task, analysis);
-  return buildExamPlan(task, analysis);
-}
+function renderCalendar() {
+  app.innerHTML = "";
+  app.appendChild(document.getElementById("calendar-view").content.cloneNode(true));
 
-function buildProjectPlan(task, analysis) {
-  const due = new Date(`${task.dueDate}T00:00:00`);
-  const baseDays = Math.max(5, Math.ceil((analysis.topics.length + 4) * (analysis.difficulty === "High" ? 1.4 : 1.1)));
-  const start = addDays(due, -baseDays - 1);
-  const phases = [
-    ["Understand requirements + gather materials", 0.2, "1.5 hrs"],
-    ["Outline and research", 0.2, "2 hrs"],
-    ["Build draft / implementation", 0.4, "4 hrs"],
-    ["Revise and polish", 0.15, "1.5 hrs"],
-    ["Final submission check", 0.05, "30 min"],
-  ];
-  return makePhasedPlan(start, due, phases, "Project");
-}
+  const year = state.monthCursor.getFullYear();
+  const month = state.monthCursor.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const events = allCalendarEvents();
 
-function buildAssignmentPlan(task, analysis) {
-  const due = new Date(`${task.dueDate}T00:00:00`);
-  const baseDays = Math.max(3, Math.ceil((analysis.topics.length + 3) * (analysis.difficulty === "High" ? 1.2 : 0.9)));
-  const start = addDays(due, -baseDays - 1);
-  const phases = [
-    ["Understand task", 0.2, "30 min"],
-    ["Gather info", 0.25, "45-60 min"],
-    ["Complete work", 0.4, "60-120 min"],
-    ["Review before due date", 0.15, "30 min"],
-  ];
-  return makePhasedPlan(start, due, phases, "Assignment");
-}
+  document.getElementById("calendar-title").textContent = firstDay.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  document.getElementById("calendar-weekdays").innerHTML = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    .map((day) => `<div>${day}</div>`)
+    .join("");
 
-function buildExamPlan(task, analysis) {
-  const due = new Date(`${task.dueDate}T00:00:00`);
-  const topics = analysis.topics.length ? analysis.topics : [{ name: "Core Topics", weight: 1 }];
-  const studyDays = Math.max(4, Math.ceil(topics.length * (analysis.difficulty === "High" ? 1.5 : 1.1)));
-  const start = addDays(due, -studyDays - 1);
-
-  const steps = [];
-  for (let i = 0; i < studyDays; i += 1) {
-    const date = addDays(start, i);
-    const t1 = topics[i % topics.length];
-    const t2 = topics[(i + 1) % topics.length];
-    const d1 = `${Number((1 + t1.weight * 2).toFixed(1))} hrs`;
-    const d2 = `${Number((0.8 + t2.weight * 1.6).toFixed(1))} hrs`;
-    let title = `${t1.name} + ${t2.name}`;
-    let desc = `Study ${t1.name} (${d1}) and ${t2.name} (${d2}).`;
-    if ((i + 1) % 3 === 0) {
-      title = `Review Block: ${t1.name}`;
-      desc = `Spaced repetition + practice questions for ${t1.name}.`;
-    }
-
-    steps.push({ title, date: toISO(date), duration: `${d1} + ${d2}`, description: desc });
+  const cells = [];
+  for (let i = 0; i < firstDay.getDay(); i += 1) {
+    cells.push(calendarCell(new Date(year, month, i - firstDay.getDay() + 1), true, events));
+  }
+  for (let day = 1; day <= lastDay.getDate(); day += 1) {
+    cells.push(calendarCell(new Date(year, month, day), false, events));
+  }
+  while (cells.length % 7 !== 0) {
+    cells.push(calendarCell(new Date(year, month + 1, cells.length - (firstDay.getDay() + lastDay.getDate()) + 1), true, events));
   }
 
-  steps.push({
-    title: "Final Review Day",
-    date: toISO(addDays(due, -1)),
-    duration: "1.5 hrs",
-    description: "Final recap, weak topic sweep, and confidence pass.",
+  document.getElementById("calendar-grid").innerHTML = cells.join("");
+
+  const upcoming = events
+    .filter((event) => daysUntil(event.date) >= 0)
+    .sort((a, b) => new Date(`${a.date}T00:00:00`) - new Date(`${b.date}T00:00:00`))
+    .slice(0, 12);
+
+  document.getElementById("calendar-upcoming").innerHTML = renderEventRows(upcoming, "No upcoming events.");
+  renderDayEvents(state.selectedDateISO);
+
+  document.getElementById("prev-month").addEventListener("click", () => {
+    state.monthCursor = new Date(year, month - 1, 1);
+    renderCalendar();
   });
 
-  return { startDate: toISO(start), steps, planType: "Exam" };
-}
+  document.getElementById("next-month").addEventListener("click", () => {
+    state.monthCursor = new Date(year, month + 1, 1);
+    renderCalendar();
+  });
 
-function makePhasedPlan(start, due, phases, type) {
-  const totalDays = Math.max(1, Math.ceil((due - start) / 86400000));
-  let cursor = new Date(start);
-  const steps = [];
-
-  phases.forEach(([title, ratio, duration], idx) => {
-    const span = idx === phases.length - 1 ? 1 : Math.max(1, Math.floor(totalDays * ratio));
-    const phaseStart = new Date(cursor);
-    const phaseEnd = addDays(phaseStart, span - 1);
-    steps.push({
-      title,
-      date: toISO(phaseStart),
-      endDate: toISO(phaseEnd),
-      duration,
-      description: `${type} phase from ${formatDate(toISO(phaseStart))} to ${formatDate(toISO(phaseEnd))}.`,
+  app.querySelectorAll(".cal-cell").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      state.selectedDateISO = cell.dataset.date;
+      renderCalendar();
     });
-    cursor = addDays(phaseEnd, 1);
   });
 
-  return { startDate: toISO(start), steps, planType: type };
+  bindEventClicks();
 }
 
-function autoGenerateOutputs(task, analysis, plan) {
-  if (task.type === "Exam") {
-    return {
-      studyPlan: formatPlanText(plan),
-      summary: generateExamSummary(analysis),
-      checklist: "☐ Daily study blocks\n☐ Review blocks\n☐ Practice exam\n☐ Final review",
-      questions: generateExamQuestions(analysis),
-      flashcards: generateExamFlashcards(analysis),
-    };
-  }
+function renderDayEvents(dateISO) {
+  const events = allCalendarEvents().filter((event) => event.date === dateISO);
+  document.getElementById("day-events").innerHTML = renderEventRows(events, `No events for ${formatDate(dateISO)}.`);
+  bindEventClicks();
+}
 
-  if (task.type === "Project") {
-    return {
-      studyPlan: formatPlanText(plan),
-      summary: `Milestone Notes\nFocus: ${(analysis.topics || []).slice(0, 5).map((t) => t.name).join(", ") || "scope, execution, polish"}`,
-      checklist: "☐ Research\n☐ Outline\n☐ Execution\n☐ Polish",
-      questions: "- unclear scope\n- resource gaps\n- timeline risk\n- quality risk",
-      flashcards: "Card 1: Research\nCard 2: Outline\nCard 3: Execution\nCard 4: Polish",
-    };
-  }
-
-  return {
-    studyPlan: formatPlanText(plan),
-    summary: "Time Estimate\n- Understand: 30m\n- Gather info: 45-60m\n- Complete: 60-120m\n- Review: 30m",
-    checklist: "☐ Understand task\n☐ Gather info\n☐ Complete work\n☐ Review",
-    questions: "1) Required format?\n2) Depth expected?\n3) Citation style?",
-    flashcards: "Card 1: Understand\nCard 2: Gather\nCard 3: Complete\nCard 4: Review",
-  };
+function calendarCell(date, outside, events) {
+  const iso = toISO(date);
+  const dayEvents = events.filter((event) => event.date === iso).slice(0, 3);
+  const selectedClass = state.selectedDateISO === iso ? "selected" : "";
+  return `<article class="cal-cell ${outside ? "outside" : ""} ${selectedClass}" data-date="${iso}">
+      <div class="cal-day">${date.getDate()}</div>
+      ${dayEvents.map((event) => `<div class="cal-item ${event.colorClass}">${escapeHtml(event.title)}</div>`).join("")}
+    </article>`;
 }
 
 function renderClasses() {
   app.innerHTML = "";
   app.appendChild(document.getElementById("classes-view").content.cloneNode(true));
 
-  const grouped = groupByClass();
+  const grouped = state.items.reduce((acc, item) => {
+    if (!acc[item.className]) acc[item.className] = [];
+    acc[item.className].push(item);
+    return acc;
+  }, {});
+
   const root = document.getElementById("classes-grouped");
-  if (!Object.keys(grouped).length) {
+  const classNames = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+  if (!classNames.length) {
     root.innerHTML = `<p class="muted">No class items yet. Add one with + Add New.</p>`;
     return;
   }
 
-  root.innerHTML = Object.entries(grouped)
-    .map(
-      ([name, tasks]) => `<article class="class-block"><h3>${escapeHtml(name)}</h3><div class="list">${tasks
+  root.innerHTML = classNames
+    .map((className) => {
+      const rows = grouped[className]
+        .sort((a, b) => new Date(`${a.dueDate}T00:00:00`) - new Date(`${b.dueDate}T00:00:00`))
         .map(
-          (t) => `<article class="item-row" data-task-id="${t.id}"><div><strong>${escapeHtml(t.title)}</strong><small>${t.type} • ${formatDate(
-            t.dueDate
-          )} • <span class="priority ${t.priority}">${t.priority}</span></small></div><span class="chevron">›</span></article>`
+          (item) => `<article class="item-row" data-item-id="${item.id}">
+              <div>
+                <strong>${escapeHtml(item.title)}</strong>
+                <small>${titleCase(item.type)} • ${formatDate(item.dueDate)} • <span class="priority ${item.priority}">${titleCase(item.priority)}</span></small>
+              </div>
+              <span class="chevron">›</span>
+            </article>`
         )
-        .join("")}</div></article>`
-    )
+        .join("");
+      return `<article class="class-block"><h3>${escapeHtml(className)}</h3><div class="list">${rows}</div></article>`;
+    })
     .join("");
 
-  bindTaskClicks();
+  bindItemClicks();
 }
 
 function renderStudyTools() {
@@ -381,89 +383,157 @@ function renderStudyTools() {
   const buttons = document.getElementById("study-buttons");
   const output = document.getElementById("study-output");
   const empty = document.getElementById("study-empty");
+  const openDetail = document.getElementById("study-open-detail");
 
-  if (!state.data.tasks.length) {
-    select.innerHTML = `<option>No items yet</option>`;
-    empty.textContent = "Select an item to begin. Add an item first if none exist.";
+  if (!state.items.length) {
+    select.innerHTML = `<option value="">No items available</option>`;
+    buttons.innerHTML = "";
+    output.innerHTML = "";
+    empty.textContent = "Add an item first to use Study Tools.";
+    openDetail.disabled = true;
     return;
   }
 
-  const tasks = sortedByDate(state.data.tasks);
-  select.innerHTML = tasks.map((t) => `<option value="${t.id}">${escapeHtml(t.title)} (${t.type})</option>`).join("");
+  const items = sortedByDueDate(state.items);
+  const selected = items.find((item) => item.id === state.selectedStudyItemId) || items[0];
+  state.selectedStudyItemId = selected.id;
 
-  const selected = state.selectedStudyTaskId ? tasks.find((t) => t.id === state.selectedStudyTaskId) : tasks[0];
-  state.selectedStudyTaskId = selected.id;
+  select.innerHTML = items.map((item) => `<option value="${item.id}">${escapeHtml(item.title)} (${titleCase(item.type)})</option>`).join("");
   select.value = selected.id;
-  empty.textContent = "";
-  draw(selected);
 
-  select.addEventListener("change", () => {
-    const task = tasks.find((t) => t.id === select.value);
-    if (!task) return;
-    state.selectedStudyTaskId = task.id;
-    state.selectedToolKey = null;
-    draw(task);
-  });
+  const toolMap = {
+    exam: ["dailyPlan", "summary", "questions", "flashcards"],
+    project: ["timeline", "milestones", "risks", "phaseCards"],
+    assignment: ["breakdown", "timeEstimate", "checklist", "clarify"],
+  };
 
-  function draw(task) {
-    const map = {
-      Exam: [["studyPlan", "Daily Study Plan"], ["summary", "Summary Notes"], ["questions", "Practice Questions"], ["flashcards", "Flashcards"]],
-      Project: [["studyPlan", "Work Timeline"], ["summary", "Milestone Notes"], ["questions", "Risks / Blockers"], ["flashcards", "Phase Cards"]],
-      Assignment: [["studyPlan", "Step Breakdown"], ["summary", "Time Estimate"], ["questions", "Checklist"], ["flashcards", "Clarify Questions"]],
-    };
+  const labelMap = {
+    dailyPlan: "Daily Study Plan",
+    summary: "Summary Notes",
+    questions: "Practice Questions",
+    flashcards: "Flashcards",
+    timeline: "Work Timeline",
+    milestones: "Milestones",
+    risks: "Risks / Blockers",
+    phaseCards: "Phase Cards",
+    breakdown: "Step Breakdown",
+    timeEstimate: "Time Estimate",
+    checklist: "Checklist",
+    clarify: "Clarify Questions",
+  };
 
-    const set = map[task.type] || [];
-    if (!state.selectedToolKey) state.selectedToolKey = set[0][0];
+  const availableTools = toolMap[selected.type];
+  if (!availableTools.includes(state.selectedTool)) state.selectedTool = availableTools[0];
 
-    buttons.innerHTML = set
-      .map(([k, label]) => `<button class="btn btn-secondary ${state.selectedToolKey === k ? "tool-btn-active" : ""}" data-tool="${k}">${label}</button>`)
+  function drawToolView(item) {
+    buttons.innerHTML = availableTools
+      .map(
+        (toolKey) => `<button class="btn btn-secondary ${state.selectedTool === toolKey ? "tool-btn-active" : ""}" data-tool="${toolKey}">${labelMap[toolKey]}</button>`
+      )
       .join("");
 
-    renderOutput(task, state.selectedToolKey);
+    const content = buildStudyToolContent(item, state.selectedTool);
+    output.innerHTML = `<div class="panel"><h3>${labelMap[state.selectedTool]}</h3>${content}</div>`;
+    empty.textContent = "";
 
-    buttons.querySelectorAll("[data-tool]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        state.selectedToolKey = btn.dataset.tool;
-        draw(task);
+    buttons.querySelectorAll("[data-tool]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.selectedTool = button.dataset.tool;
+        drawToolView(item);
       });
     });
   }
 
-  function renderOutput(task, key) {
-    const text = state.data.outputs[task.id]?.[key] || "No generated output yet.";
-    output.innerHTML = renderStructuredOutput(task, key, text);
+  drawToolView(selected);
+
+  select.addEventListener("change", () => {
+    const item = items.find((candidate) => candidate.id === select.value);
+    if (!item) return;
+    state.selectedStudyItemId = item.id;
+    state.selectedTool = null;
+    renderStudyTools();
+  });
+
+  openDetail.addEventListener("click", () => openDetailModal(state.selectedStudyItemId));
+}
+
+function buildStudyToolContent(item, toolKey) {
+  const topics = inferTopics(item).slice(0, 6);
+  const notesSummary = item.notes || "No notes provided yet.";
+
+  if (item.type === "exam") {
+    const studyDays = item.generatedPlan.studyDays || [];
+    if (toolKey === "dailyPlan") {
+      return studyDays.length
+        ? `<ul>${studyDays
+            .map((entry) => `<li><strong>${formatDate(entry.date)}:</strong> ${escapeHtml(entry.topic)} (${escapeHtml(entry.duration)}) - ${escapeHtml(entry.description)}</li>`)
+            .join("")}</ul>`
+        : `<p>No study plan generated yet.</p>`;
+    }
+    if (toolKey === "summary") return `<p>${escapeHtml(notesSummary)}</p><p><strong>Key topics:</strong> ${escapeHtml(topics.join(", ") || "None detected")}</p>`;
+    if (toolKey === "questions") return `<ol>${topics.map((topic) => `<li>Explain ${escapeHtml(topic)} and give one applied example.</li>`).join("")}</ol>`;
+    return `<ul>${topics.map((topic) => `<li><strong>Q:</strong> ${escapeHtml(topic)}<br /><strong>A:</strong> Define it in your own words and give one example.</li>`).join("")}</ul>`;
   }
+
+  const steps = item.generatedPlan.steps || [];
+  if (item.type === "project") {
+    if (toolKey === "timeline") return `<ul>${steps.map((step) => `<li><strong>${formatDate(step.date)}:</strong> ${escapeHtml(step.title)} (${escapeHtml(step.duration)})</li>`).join("")}</ul>`;
+    if (toolKey === "milestones") return `<ol>${steps.map((step) => `<li>${escapeHtml(step.title)} - ${escapeHtml(step.description)}</li>`).join("")}</ol>`;
+    if (toolKey === "risks") return `<ul>${buildRiskList(item, topics).map((risk) => `<li>${escapeHtml(risk)}</li>`).join("")}</ul>`;
+    return `<div>${steps.map((step) => `<p><strong>${escapeHtml(step.title)}:</strong> ${escapeHtml(step.duration)} | ${formatDate(step.date)}</p>`).join("")}</div>`;
+  }
+
+  if (toolKey === "breakdown") return `<ul>${steps.map((step) => `<li><strong>${escapeHtml(step.title)}:</strong> ${escapeHtml(step.description)}</li>`).join("")}</ul>`;
+  if (toolKey === "timeEstimate") return `<ul>${steps.map((step) => `<li>${escapeHtml(step.title)} - ${escapeHtml(step.duration)}</li>`).join("")}</ul>`;
+  if (toolKey === "checklist") return `<ul>${steps.map((step) => `<li>☐ ${escapeHtml(step.title)}</li>`).join("")}</ul>`;
+  return `<ol>${topics.map((topic) => `<li>Should I clarify expectations for: ${escapeHtml(topic)}?</li>`).join("")}</ol>`;
 }
 
-function renderStructuredOutput(task, key, text) {
-  const lines = text.split("\n").filter(Boolean);
-  const bullets = lines.filter((l) => l.startsWith("-") || l.startsWith("☐") || /^\d+[).]/.test(l));
-  const intro = lines.filter((l) => !bullets.includes(l)).slice(0, 4);
-  return `<div class="panel"><h4>${escapeHtml(titleForOutput(task.type, key))}</h4>${intro.map((l) => `<p>${escapeHtml(l)}</p>`).join("")}${
-    bullets.length ? `<ul>${bullets.map((l) => `<li>${escapeHtml(l.replace(/^-\s*/, ""))}</li>`).join("")}</ul>` : ""
-  }</div><pre>${escapeHtml(text)}</pre>`;
+function buildRiskList(item, topics) {
+  const risks = [
+    "Scope creep could expand workload beyond available days.",
+    "Research sources may be weaker than expected; validate early.",
+    "Final polish might be rushed if milestone deadlines slip.",
+  ];
+  if (topics.length) risks.push(`Watch complexity around: ${topics.slice(0, 2).join(", ")}.`);
+  if (item.notes.length < 20) risks.push("Add clearer requirements in notes to avoid ambiguity.");
+  return risks;
 }
 
-function titleForOutput(type, key) {
-  const map = {
-    studyPlan: type === "Exam" ? "Daily Study Plan" : type === "Project" ? "Work Timeline" : "Step Breakdown",
-    summary: type === "Exam" ? "Summary Notes" : type === "Project" ? "Milestone Notes" : "Time Estimate",
-    questions: type === "Exam" ? "Practice Questions" : type === "Project" ? "Risks / Blockers" : "Checklist",
-    flashcards: type === "Exam" ? "Flashcards" : type === "Project" ? "Phase Cards" : "Clarify Questions",
+function openDetailModal(itemId) {
+  const item = state.items.find((candidate) => candidate.id === itemId);
+  if (!item) return;
+
+  const tabContent = {
+    overview: () => `<div class="kv">
+      <p><strong>Title:</strong> ${escapeHtml(item.title)}</p>
+      <p><strong>Type:</strong> ${titleCase(item.type)}</p>
+      <p><strong>Class:</strong> ${escapeHtml(item.className)}</p>
+      <p><strong>Professor:</strong> ${escapeHtml(item.professor || "Not set")}</p>
+      <p><strong>Due Date:</strong> ${formatDate(item.dueDate)}</p>
+      <p><strong>Priority:</strong> <span class="priority ${item.priority}">${titleCase(item.priority)}</span></p>
+      <p><strong>Notes:</strong> ${escapeHtml(item.notes || "No notes")}</p>
+    </div>`,
+    timeline: () => renderPlanTimeline(item),
+    materials: () => `<div>
+      <p><strong>Uploaded files:</strong></p>
+      <ul class="file-list">${
+        item.uploadedFiles.length
+          ? item.uploadedFiles
+              .map((file) => `<li>${escapeHtml(file.fileName)} (${file.fileType.toUpperCase()}) ${file.extractionError ? `- ${escapeHtml(file.extractionError)}` : ""}</li>`)
+              .join("")
+          : "<li>No files uploaded.</li>"
+      }</ul>
+      <p><strong>Extracted text:</strong></p>
+      <p class="muted">${escapeHtml(item.extractedText.slice(0, 2500) || "No extracted text available.")}</p>
+    </div>`,
+    generated: () => `<div>${renderGeneratedPlanJSON(item.generatedPlan)}</div>`,
   };
-  return map[key] || "Generated Output";
-}
 
-function openItemDetail(taskId) {
-  const task = state.data.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-
-  const files = state.data.materials[taskId] || [];
-  const outputs = state.data.outputs[taskId] || {};
-  const plan = state.data.plans[taskId] || { steps: [] };
-  const analysis = state.data.analysis[taskId] || { topics: [], difficulty: "Low" };
-
-  modal.innerHTML = `<div class="modal-head"><h2>${escapeHtml(task.title)}</h2><div class="action-row"><button id="edit-item" class="btn btn-ghost">Edit</button><button id="close-modal" class="btn btn-ghost">Close</button></div></div>
+  modal.innerHTML = `<div class="modal-head">
+      <h2>${escapeHtml(item.title)}</h2>
+      <button id="close-modal" class="btn btn-ghost">Close</button>
+    </div>
     <div class="modal-tabs">
       <button class="btn btn-secondary tool-btn-active" data-tab="overview">Overview</button>
       <button class="btn btn-secondary" data-tab="timeline">Timeline</button>
@@ -471,284 +541,334 @@ function openItemDetail(taskId) {
       <button class="btn btn-secondary" data-tab="generated">Generated Plan</button>
     </div>
     <div id="modal-content" class="modal-content"></div>
-    <div class="action-row" style="margin-top:0.7rem;"><button id="delete-item" class="btn btn-danger">Delete Item</button></div>`;
+    <div class="action-row" style="margin-top: 0.8rem;">
+      <button id="edit-item" class="btn btn-ghost">Edit</button>
+      <button id="delete-item" class="btn btn-danger">Delete</button>
+    </div>`;
 
   modal.showModal();
-  renderModalTab("overview");
+  setModalTab("overview");
 
-  modal.querySelectorAll("[data-tab]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      modal.querySelectorAll("[data-tab]").forEach((b) => b.classList.remove("tool-btn-active"));
-      btn.classList.add("tool-btn-active");
-      renderModalTab(btn.dataset.tab);
+  modal.querySelector("#close-modal").addEventListener("click", closeModal);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeModal();
+  }, { once: true });
+
+  modal.querySelectorAll("[data-tab]").forEach((button) => {
+    button.addEventListener("click", () => setModalTab(button.dataset.tab));
+  });
+
+  modal.querySelector("#edit-item").addEventListener("click", () => {
+    state.activeView = "add";
+    renderAddForm(item);
+  });
+
+  modal.querySelector("#delete-item").addEventListener("click", () => {
+    const confirmed = window.confirm(`Delete "${item.title}"? This cannot be undone.`);
+    if (!confirmed) return;
+    setItems(state.items.filter((entry) => entry.id !== item.id));
+    closeModal();
+    if (state.selectedStudyItemId === item.id) state.selectedStudyItemId = null;
+    render();
+  });
+
+  function setModalTab(tab) {
+    modal.querySelectorAll("[data-tab]").forEach((button) => {
+      button.classList.toggle("tool-btn-active", button.dataset.tab === tab);
     });
-  });
-
-  document.getElementById("close-modal").addEventListener("click", () => modal.close());
-  document.getElementById("delete-item").addEventListener("click", () => {
-    if (!window.confirm(`Delete ${task.title}?`)) return;
-    removeTask(task.id);
-    modal.close();
-    render();
-  });
-
-  document.getElementById("edit-item").addEventListener("click", () => {
-    const newNotes = prompt("Edit notes:", task.notes || "");
-    if (newNotes === null) return;
-    task.notes = newNotes.trim();
-    const analysisUpdated = analyzeStudyMaterial(`${task.notes}\n${files.map((f) => f.text).join("\n")}`);
-    state.data.analysis[task.id] = analysisUpdated;
-    state.data.plans[task.id] = buildStructuredPlan(task, analysisUpdated);
-    state.data.outputs[task.id] = autoGenerateOutputs(task, analysisUpdated, state.data.plans[task.id]);
-    updateCalendarEventsForTask(task.id);
-    persist();
-    renderModalTab("overview");
-    render();
-  });
-
-  function renderModalTab(tab) {
-    const root = document.getElementById("modal-content");
-
-    if (tab === "overview") {
-      root.innerHTML = `<p><strong>Type:</strong> ${task.type}</p><p><strong>Class:</strong> ${escapeHtml(task.className)}</p><p><strong>Due Date:</strong> ${formatDate(
-        task.dueDate
-      )}</p><p><strong>Priority:</strong> <span class="priority ${task.priority}">${task.priority}</span></p><p><strong>Notes:</strong> ${escapeHtml(
-        task.notes || "No notes"
-      )}</p>`;
-      return;
-    }
-
-    if (tab === "timeline") {
-      root.innerHTML = plan.steps.length
-        ? `<ul>${plan.steps
-            .map(
-              (s) => `<li><strong>${escapeHtml(s.title)}</strong> — ${formatDate(s.date)}${s.endDate ? ` to ${formatDate(s.endDate)}` : ""} (${escapeHtml(
-                s.duration
-              )})<br/><span class="muted">${escapeHtml(s.description || "")}</span></li>`
-            )
-            .join("")}</ul>`
-        : `<p class="muted">No timeline generated yet.</p>`;
-      return;
-    }
-
-    if (tab === "materials") {
-      root.innerHTML = `<p><strong>Files:</strong></p><ul class="file-list">${
-        files.map((f) => `<li>${escapeHtml(f.fileName)} (${f.fileType})</li>`).join("") || "<li>No files uploaded.</li>"
-      }</ul><p class="muted">Extracted summary: ${escapeHtml((files.map((f) => f.text).join(" ").slice(0, 420) || "No extracted text."))}</p><p class="muted">Difficulty: ${analysis.difficulty}. Topics: ${(analysis.topics || [])
-        .map((t) => t.name)
-        .join(", ") || "none"}</p>`;
-      return;
-    }
-
-    root.innerHTML = `<div class="output">${escapeHtml(
-      Object.entries(outputs)
-        .map(([k, v]) => `${k}:\n${v}`)
-        .join("\n\n") || "No generated outputs yet."
-    )}</div>`;
+    modal.querySelector("#modal-content").innerHTML = tabContent[tab]();
   }
 }
 
-function openDateEventList(date) {
-  const events = getAllCalendarEvents().filter((e) => e.date === date);
-  if (!events.length) return;
-  modal.innerHTML = `<div class="modal-head"><h2>${formatDate(date)}</h2><button id="close-modal" class="btn btn-ghost">Close</button></div>
-  <div class="list">${events
-    .map(
-      (e) => `<article class="item-row" data-task-id="${e.taskId}"><div><strong>${escapeHtml(e.title)}</strong><small>${escapeHtml(
-        e.label
-      )}</small></div><span class="tag ${e.colorClass}">${e.colorClass}</span></article>`
-    )
-    .join("")}</div>`;
-  modal.showModal();
-  document.getElementById("close-modal").addEventListener("click", () => modal.close());
-  modal.querySelectorAll("[data-task-id]").forEach((row) => row.addEventListener("click", () => openItemDetail(row.dataset.taskId)));
+function closeModal() {
+  if (modal.open) modal.close();
 }
 
-function removeTask(taskId) {
-  const task = state.data.tasks.find((t) => t.id === taskId);
-  if (!task) return;
-  state.data.tasks = state.data.tasks.filter((t) => t.id !== taskId);
-  delete state.data.materials[taskId];
-  delete state.data.outputs[taskId];
-  delete state.data.analysis[taskId];
-  delete state.data.plans[taskId];
-  state.data.calendarEvents = state.data.calendarEvents.filter((e) => e.taskId !== taskId);
-  if (state.data.classes[task.className]) {
-    state.data.classes[task.className] = state.data.classes[task.className].filter((id) => id !== taskId);
-    if (!state.data.classes[task.className].length) delete state.data.classes[task.className];
+function renderPlanTimeline(item) {
+  if (item.type === "exam") {
+    const studyDays = item.generatedPlan.studyDays || [];
+    if (!studyDays.length) return `<p class="muted">No study timeline generated yet.</p>`;
+    return `<ul>${studyDays
+      .map((day) => `<li><strong>${formatDate(day.date)}:</strong> ${escapeHtml(day.topic)} (${escapeHtml(day.duration)})<br /><span class="muted">${escapeHtml(day.description)}</span></li>`)
+      .join("")}</ul>`;
   }
-  persist();
+
+  const steps = item.generatedPlan.steps || [];
+  if (!steps.length) return `<p class="muted">No timeline generated yet.</p>`;
+  return `<ul>${steps
+    .map((step) => `<li><strong>${formatDate(step.date)}:</strong> ${escapeHtml(step.title)} (${escapeHtml(step.duration)})<br /><span class="muted">${escapeHtml(step.description)}</span></li>`)
+    .join("")}</ul>`;
 }
 
-function renderTaskRows(tasks, empty) {
-  if (!tasks.length) return `<p class="muted">${empty}</p>`;
-  return tasks
+function renderGeneratedPlanJSON(plan) {
+  return `<pre>${escapeHtml(JSON.stringify(plan, null, 2))}</pre>`;
+}
+
+function renderItemRows(items, emptyMessage) {
+  if (!items.length) return `<p class="muted">${emptyMessage}</p>`;
+  return items
     .map(
-      (t) => `<article class="item-row" data-task-id="${t.id}"><div><strong>${escapeHtml(t.title)}</strong><small>${escapeHtml(
-        t.className
-      )} • ${formatDate(t.dueDate)} • <span class="priority ${t.priority}">${t.priority}</span></small></div><span class="chevron">›</span></article>`
+      (item) => `<article class="item-row" data-item-id="${item.id}">
+          <div>
+            <strong>${escapeHtml(item.title)}</strong>
+            <small>${escapeHtml(item.className)} • ${titleCase(item.type)} • ${formatDate(item.dueDate)} • <span class="priority ${item.priority}">${titleCase(item.priority)}</span></small>
+          </div>
+          <span class="chevron">›</span>
+        </article>`
     )
     .join("");
 }
 
-function renderEventRows(events, empty) {
-  if (!events.length) return `<p class="muted">${empty}</p>`;
+function renderEventRows(events, emptyMessage) {
+  if (!events.length) return `<p class="muted">${emptyMessage}</p>`;
   return events
     .map(
-      (e) => `<article class="item-row" data-event-task="${e.taskId}"><div><strong>${escapeHtml(e.title)}</strong><small>${formatDate(
-        e.date
-      )} • ${escapeHtml(e.label)}</small></div><span class="tag ${e.colorClass}">${e.colorClass === "session" ? "Session" : e.colorClass}</span></article>`
+      (event) => `<article class="item-row" data-item-id="${event.itemId}">
+          <div>
+            <strong>${escapeHtml(event.title)}</strong>
+            <small>${formatDate(event.date)} • ${escapeHtml(event.label)} • ${escapeHtml(event.parentTitle)}</small>
+          </div>
+          <span class="tag ${event.colorClass}">${titleCase(event.colorClass)}</span>
+        </article>`
     )
     .join("");
 }
 
-function bindTaskClicks() {
-  app.querySelectorAll("[data-task-id]").forEach((el) => el.addEventListener("click", () => openItemDetail(el.dataset.taskId)));
+function bindItemClicks() {
+  app.querySelectorAll("[data-item-id]").forEach((element) => {
+    element.addEventListener("click", () => openDetailModal(element.dataset.itemId));
+  });
 }
 
 function bindEventClicks() {
-  app.querySelectorAll("[data-event-task]").forEach((el) => el.addEventListener("click", () => openItemDetail(el.dataset.eventTask)));
-}
-
-function groupByClass() {
-  const grouped = {};
-  for (const task of state.data.tasks) {
-    if (!grouped[task.className]) grouped[task.className] = [];
-    grouped[task.className].push(task);
-  }
-  Object.keys(grouped).forEach((k) => grouped[k].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)));
-  return grouped;
-}
-
-function allMaterials() {
-  return Object.entries(state.data.materials).flatMap(([taskId, files]) => {
-    const task = state.data.tasks.find((t) => t.id === taskId);
-    if (!task) return [];
-    return files.map((f) => ({ ...f, taskId, taskTitle: task.title, className: task.className, type: task.type }));
+  app.querySelectorAll("[data-item-id]").forEach((element) => {
+    element.addEventListener("click", () => openDetailModal(element.dataset.itemId));
   });
 }
 
-function getAllCalendarEvents() {
-  const dueEvents = state.data.tasks.map((t) => ({ taskId: t.id, title: t.title, date: t.dueDate, label: `${t.type} due`, colorClass: t.type }));
-  return [...dueEvents, ...(state.data.calendarEvents || [])];
+function collectRecentUploads() {
+  return state.items
+    .flatMap((item) =>
+      item.uploadedFiles.map((file) => ({
+        itemId: item.id,
+        itemTitle: item.title,
+        className: item.className,
+        fileName: file.fileName,
+        uploadedAt: file.uploadedAt || item.updatedAt,
+      }))
+    )
+    .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
 }
 
-function updateCalendarEventsForTask(taskId) {
-  state.data.calendarEvents = (state.data.calendarEvents || []).filter((e) => e.taskId !== taskId);
-  const task = state.data.tasks.find((t) => t.id === taskId);
-  const plan = state.data.plans[taskId];
-  if (!task || !plan?.steps?.length) return;
+function allCalendarEvents() {
+  return state.items
+    .flatMap((item) => {
+      const dueEvent = {
+        itemId: item.id,
+        parentTitle: item.title,
+        title: `${item.title} (Due)`,
+        date: item.dueDate,
+        label: `${titleCase(item.type)} due`,
+        colorClass: item.type,
+      };
+      return [dueEvent, ...item.calendarEvents.map((event) => ({ ...event, itemId: item.id, parentTitle: item.title }))];
+    })
+    .filter((event) => Boolean(event.date));
+}
 
-  plan.steps.forEach((step) => {
-    state.data.calendarEvents.push({
-      taskId,
-      title: step.title,
-      date: step.date,
-      label: `${task.type} session`,
+function buildCalendarEvents(item) {
+  if (item.type === "exam") {
+    return (item.generatedPlan.studyDays || []).map((day) => ({
+      title: day.topic,
+      date: day.date,
+      label: "Study session",
       colorClass: "session",
+    }));
+  }
+
+  return (item.generatedPlan.steps || []).map((step) => ({
+    title: step.title,
+    date: step.date,
+    label: item.type === "project" ? "Project step" : "Assignment step",
+    colorClass: "session",
+  }));
+}
+
+function generatePlan(item) {
+  if (item.type === "exam") return generateExamPlan(item);
+  if (item.type === "project") return generateProjectPlan(item);
+  return generateAssignmentPlan(item);
+}
+
+function generateExamPlan(item) {
+  const due = new Date(`${item.dueDate}T00:00:00`);
+  const topics = inferTopics(item);
+  const daysAvailable = Math.max(4, Math.min(14, daysUntil(item.dueDate) || 6));
+  const start = addDays(due, -daysAvailable);
+  const studyDays = [];
+
+  for (let i = 0; i < daysAvailable; i += 1) {
+    const date = toISO(addDays(start, i));
+    const isReview = i > 0 && i % 3 === 0;
+    const isFinalReview = i === daysAvailable - 1;
+
+    if (isFinalReview) {
+      studyDays.push({
+        date,
+        topic: "Final Review + Confidence Pass",
+        duration: "90 min",
+        description: "Revisit weak areas, complete one mixed practice set, and prepare exam-day checklist.",
+      });
+      continue;
+    }
+
+    if (isReview) {
+      const topicSlice = topics.slice(0, 3).join(", ") || "core concepts";
+      studyDays.push({
+        date,
+        topic: `Review Day: ${topicSlice}`,
+        duration: "75 min",
+        description: "Use spaced repetition and timed recall on previous topics.",
+      });
+      continue;
+    }
+
+    const topic = topics[i % topics.length] || "Core material";
+    studyDays.push({
+      date,
+      topic,
+      duration: `${60 + (i % 2) * 30} min`,
+      description: `Learn and summarize ${topic}; finish with 5 self-test questions.`,
     });
-  });
+  }
+
+  return { startDate: toISO(start), studyDays };
 }
 
-function analyzeStudyMaterial(text) {
-  const cleaned = (text || "").replace(/\s+/g, " ").trim();
-  if (!cleaned) return { topics: [], keywords: [], sections: [], difficulty: "Low", complexityScore: 0 };
+function generateProjectPlan(item) {
+  const due = new Date(`${item.dueDate}T00:00:00`);
+  const daysAvailable = Math.max(7, Math.min(30, daysUntil(item.dueDate) || 10));
+  const start = addDays(due, -daysAvailable);
 
-  const sections = cleaned
-    .split(/(?:\n\n+|\.|:)/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 16)
-    .slice(0, 14);
+  const phases = [
+    ["Scope & Requirements", 0.18, "2 hrs", "Clarify deliverables, rubric, and acceptance criteria."],
+    ["Research & Sources", 0.22, "3 hrs", "Collect references, examples, and data inputs."],
+    ["Build Draft", 0.32, "5 hrs", "Create first complete version and core implementation."],
+    ["Revision & QA", 0.18, "2.5 hrs", "Fix issues, tighten structure, and improve quality."],
+    ["Final Packaging", 0.1, "1 hr", "Prepare submission, format files, and final checks."],
+  ];
 
-  const tokens = cleaned
+  let cursor = new Date(start);
+  const steps = phases.map(([title, ratio, duration, description], index) => {
+    const offset = index === phases.length - 1 ? 0 : Math.max(1, Math.floor(daysAvailable * ratio));
+    const stepDate = toISO(cursor);
+    cursor = addDays(cursor, offset);
+    return { date: stepDate, title, duration, description };
+  });
+
+  return { startDate: toISO(start), steps };
+}
+
+function generateAssignmentPlan(item) {
+  const due = new Date(`${item.dueDate}T00:00:00`);
+  const daysAvailable = Math.max(3, Math.min(12, daysUntil(item.dueDate) || 5));
+  const start = addDays(due, -daysAvailable);
+
+  const stepsTemplate = [
+    ["Understand Prompt", "30 min", "Read instructions and identify required output format."],
+    ["Collect Notes & Sources", "45 min", "Gather lecture notes, examples, and references."],
+    ["Draft Response", "60-90 min", "Complete first pass with clear structure."],
+    ["Revise for Accuracy", "45 min", "Check logic, citations, and rubric alignment."],
+    ["Final Submission Check", "20 min", "Proofread and submit with required attachments."],
+  ];
+
+  const steps = stepsTemplate.slice(0, Math.min(stepsTemplate.length, daysAvailable + 1)).map((template, index) => ({
+    date: toISO(addDays(start, index)),
+    title: template[0],
+    duration: template[1],
+    description: template[2],
+  }));
+
+  return { startDate: toISO(start), steps };
+}
+
+function inferTopics(item) {
+  const source = `${item.notes || ""}\n${item.extractedText || ""}`;
+  const lines = source
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const headingTopics = lines
+    .filter((line) => line.length <= 80 && /[:\-]/.test(line))
+    .map((line) => line.split(/[:\-]/)[0].trim())
+    .filter((text) => text.length > 3);
+
+  const tokens = source
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter((w) => w.length > 4 && !COMMON_WORDS.has(w));
+    .filter((word) => word.length > 4 && !COMMON_WORDS.has(word));
 
-  const counts = new Map();
-  tokens.forEach((w) => counts.set(w, (counts.get(w) || 0) + 1));
-  const keywords = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([w]) => w);
+  const frequency = new Map();
+  for (const token of tokens) {
+    frequency.set(token, (frequency.get(token) || 0) + 1);
+  }
 
-  const topicMap = new Map();
-  sections.forEach((section) => {
-    const name = toTopicName(section, keywords);
-    topicMap.set(name, (topicMap.get(name) || 0) + 1);
-  });
+  const frequent = [...frequency.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([word]) => titleCase(word));
 
-  const total = [...topicMap.values()].reduce((a, b) => a + b, 0) || 1;
-  const topics = [...topicMap.entries()]
-    .map(([name, count]) => ({ name, weight: Number((count / total).toFixed(2)) }))
-    .sort((a, b) => b.weight - a.weight)
-    .slice(0, 10);
+  const merged = [...headingTopics, ...frequent];
+  const unique = [];
+  const seen = new Set();
+  for (const topic of merged) {
+    const key = topic.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(topic);
+    }
+  }
 
-  const score = Math.min(1, (tokens.length / 850) * 0.45 + (topics.length / 10) * 0.3 + (keywords.length / 15) * 0.25);
-  const difficulty = score > 0.72 ? "High" : score > 0.42 ? "Medium" : "Low";
-
-  return { topics, keywords, sections, difficulty, complexityScore: Number(score.toFixed(2)) };
-}
-
-function formatPlanText(plan) {
-  return `Start Date: ${formatDate(plan.startDate)}\n${plan.steps
-    .map((s) => `${s.title}: ${formatDate(s.date)}${s.endDate ? `–${formatDate(s.endDate)}` : ""} (${s.duration})\n${s.description}`)
-    .join("\n\n")}`;
-}
-
-function generateExamSummary(analysis) {
-  return `Top topics:\n${analysis.topics.slice(0, 8).map((t, i) => `${i + 1}) ${t.name} (weight ${t.weight})`).join("\n") || "No topics yet."}`;
-}
-
-function generateExamQuestions(analysis) {
-  const topics = analysis.topics.map((t) => t.name);
-  return `1) Explain ${topics[0] || "a core concept"}.\n2) Compare ${topics[1] || "topic A"} and ${topics[2] || "topic B"}.\n3) Apply ${topics[3] || "a concept"}.`;
-}
-
-function generateExamFlashcards(analysis) {
-  return (analysis.topics.slice(0, 8).map((t, i) => `Card ${i + 1}: ${t.name}`).join("\n") || "Card 1: Main concept");
-}
-
-function sortedByDate(items) {
-  return [...items].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
-}
-
-function toTopicName(section, keywords) {
-  const tokens = section
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 4 && !COMMON_WORDS.has(w));
-  const ranked = tokens.filter((t) => keywords.includes(t)).slice(0, 3).join(" ");
-  return (ranked || section.slice(0, 32)).replace(/\b\w/g, (c) => c.toUpperCase());
+  return unique.length ? unique : ["Core Concepts", "Lecture Notes", "Practice Problems"];
 }
 
 async function extractPdfText(file) {
+  if (!window.pdfjsLib) throw new Error("PDF.js is not loaded.");
   const bytes = await file.arrayBuffer();
   const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
   let text = "";
   for (let page = 1; page <= pdf.numPages; page += 1) {
-    const p = await pdf.getPage(page);
-    const c = await p.getTextContent();
-    text += `\n[Page ${page}] ${c.items.map((i) => ("str" in i ? i.str : "")).join(" ")}`;
+    const pdfPage = await pdf.getPage(page);
+    const content = await pdfPage.getTextContent();
+    const pageText = content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
+    text += `\n[Page ${page}] ${pageText}`;
   }
   return text.trim();
 }
 
-function daysUntil(dateISO) {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.max(0, Math.ceil((new Date(`${dateISO}T00:00:00`) - today) / 86400000));
+function sortedByDueDate(items) {
+  return [...items].sort((a, b) => new Date(`${a.dueDate}T00:00:00`) - new Date(`${b.dueDate}T00:00:00`));
+}
+
+function daysUntil(isoDate) {
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const target = new Date(`${isoDate}T00:00:00`);
+  return Math.floor((target - startToday) / 86400000);
 }
 
 function addDays(date, days) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
 }
 
-function formatDate(dateISO) {
-  if (!dateISO) return "No date";
-  const d = new Date(`${dateISO}T00:00:00`);
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+function formatDate(isoDate) {
+  if (!isoDate) return "No date";
+  const date = new Date(`${isoDate}T00:00:00`);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 function toISO(date) {
@@ -756,7 +876,14 @@ function toISO(date) {
 }
 
 function getExt(name) {
-  return name.toLowerCase().split(".").pop();
+  return String(name).toLowerCase().split(".").pop();
+}
+
+function titleCase(value) {
+  return String(value)
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function escapeHtml(value) {
@@ -793,4 +920,6 @@ const COMMON_WORDS = new Set([
   "chapter",
   "section",
   "lecture",
+  "notes",
+  "review",
 ]);

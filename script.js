@@ -613,7 +613,7 @@ async function extractPdfText(file) {
     }
     const joined = pages.join('\n\n').trim();
     if (joined.replace(/\s/g, '').length < 40) {
-      return { status: 'likely_scanned', message: 'PDF uploaded successfully, but no selectable text was found.', text: '' };
+      return { status: 'likely_scanned', message: 'This PDF appears to be scanned or image-based, so no selectable text was found.', text: '' };
     }
     return { status: 'success', message: 'PDF text extracted successfully.', text: joined };
   } catch (err) {

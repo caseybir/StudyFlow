@@ -334,6 +334,7 @@ function renderAddForm(item = null) {
       const key = ev.target.dataset.uploadKey;
       const statusEl = root.querySelector(`[data-upload-status='${key}']`);
       const textEl = root.querySelector(`[name='study_${key}']`);
+      const statusMessages = [];
       for (const file of files) {
         statusEl.textContent = `Uploading ${file.name}...`;
         const entry = { name: file.name, type: file.type || 'unknown', extractionStatus: 'pending', extractionMessage: '' };
@@ -357,8 +358,9 @@ function renderAddForm(item = null) {
           entry.extractionMessage = 'Unsupported file type. Use PDF or TXT.';
         }
         draft[key].files.push(entry);
+        statusMessages.push(`${file.name}: ${entry.extractionMessage}`);
       }
-      statusEl.textContent = 'Upload complete.';
+      statusEl.textContent = statusMessages.join(' | ') || 'Upload complete.';
       refreshFileList(root, key, draft[key].files);
       ev.target.value = '';
     });
@@ -597,7 +599,7 @@ async function extractPdfText(file) {
   }
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
     const pages = [];
     for (let n = 1; n <= pdf.numPages; n += 1) {
       try {
@@ -611,7 +613,7 @@ async function extractPdfText(file) {
     }
     const joined = pages.join('\n\n').trim();
     if (joined.replace(/\s/g, '').length < 40) {
-      return { status: 'likely_scanned', message: 'This PDF may be scanned or image-based, so no selectable text was found. Try a text-based PDF or paste notes manually.', text: '' };
+      return { status: 'likely_scanned', message: 'PDF uploaded successfully, but no selectable text was found.', text: '' };
     }
     return { status: 'success', message: 'PDF text extracted successfully.', text: joined };
   } catch (err) {
@@ -713,7 +715,7 @@ function render() {
 
 function initPdfWorker() {
   if (!window.pdfjsLib) return;
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.mjs`;
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`;
 }
 
 function init() {

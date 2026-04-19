@@ -1,10 +1,14 @@
 const STORAGE_KEY = "studyflow_v3";
+const PDFJS_VERSION = "4.3.136";
 const app = document.getElementById("app");
 const topNav = document.getElementById("top-nav");
 const modal = document.getElementById("item-modal");
 
 if (window.pdfjsLib) {
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.worker.min.js";
+  // Keep worker version exactly matched to the loaded PDF.js library version.
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`;
+} else {
+  console.warn("PDF.js library is not loaded. PDF extraction will be unavailable.");
 }
 
 const state = {
@@ -44,7 +48,19 @@ function normalizeItem(item) {
     difficulty: (item.difficulty || "medium").toLowerCase(),
     estimatedHours: Math.max(1, Number(item.estimatedHours || 6)),
     notes: item.notes || "",
-    uploadedFiles: Array.isArray(item.uploadedFiles) ? item.uploadedFiles : [],
+    uploadedFiles: Array.isArray(item.uploadedFiles)
+      ? item.uploadedFiles.map((file) => ({
+          id: file.id || crypto.randomUUID(),
+          fileName: file.fileName || "Uploaded file",
+          fileType: file.fileType || getExt(file.fileName || "") || "txt",
+          text: file.text || "",
+          uploadedAt: file.uploadedAt || item.updatedAt || new Date().toISOString(),
+          extractionStatus: file.extractionStatus || (file.text ? "success" : "unknown"),
+          extractionMessage: file.extractionMessage || file.extractionError || "",
+          likelyScanned: Boolean(file.likelyScanned),
+          extractionError: file.extractionError || "",
+        }))
+      : [],
     extractedText: item.extractedText || "",
     examInputs: {
       topicsText: item.examInputs?.topicsText || "",
@@ -295,20 +311,35 @@ function renderAddForm(prefillItem = null) {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
 
-    status.textContent = "Reading files...";
+    status.textContent = "Uploading...";
     for (const file of files) {
       const ext = getExt(file.name);
       if (!["pdf", "txt"].includes(ext)) continue;
 
       let text = "";
       let extractionError = "";
+      let extractionStatus = "success";
+      let extractionMessage = "Text extracted successfully.";
+      let likelyScanned = false;
       if (ext === "txt") {
+        status.textContent = `Reading ${file.name}...`;
         text = await file.text();
+        if (!text.trim()) {
+          extractionStatus = "empty";
+          extractionMessage = "Text file is empty.";
+        }
       } else {
+        status.textContent = `Extracting text from ${file.name}...`;
         try {
-          text = await extractPdfText(file);
+          const result = await extractPdfText(file);
+          text = result.text;
+          extractionStatus = result.status;
+          extractionMessage = result.message;
+          likelyScanned = result.likelyScanned;
         } catch (error) {
           extractionError = "Could not parse this PDF text. You can still save the item.";
+          extractionStatus = "failed";
+          extractionMessage = "PDF uploaded successfully, but no selectable text was found. Try pasting notes manually or uploading a text-based PDF.";
           console.error("PDF parse error", error);
         }
       }
@@ -319,12 +350,18 @@ function renderAddForm(prefillItem = null) {
         fileType: ext,
         text,
         uploadedAt: new Date().toISOString(),
+        extractionStatus,
+        extractionMessage,
+        likelyScanned,
         extractionError,
       });
     }
 
     drawPendingFiles(uploadList);
-    status.textContent = `${state.pendingFiles.length} file(s) attached.`;
+    const failedCount = state.pendingFiles.filter((file) => file.extractionStatus === "failed" || file.extractionStatus === "likely_scanned").length;
+    status.textContent = failedCount
+      ? `${state.pendingFiles.length} file(s) attached. ${failedCount} file(s) had limited extractable text.`
+      : "Text extracted successfully.";
     fileInput.value = "";
   });
 
@@ -385,7 +422,9 @@ function drawPendingFiles(uploadList) {
     ? state.pendingFiles
         .map(
           (file) => `<li>${escapeHtml(file.fileName)} (${file.fileType.toUpperCase()}) ${
-            file.extractionError ? `<span class="priority high">${escapeHtml(file.extractionError)}</span>` : ""
+            file.extractionStatus === "success"
+              ? `<span class="priority low">Text extracted</span>`
+              : `<span class="priority high">${escapeHtml(file.extractionMessage || file.extractionError || "Could not extract text")}</span>`
           }</li>`
         )
         .join("")
@@ -721,7 +760,20 @@ function openDetailModal(itemId) {
     quiz: () => (item.type === "exam" ? renderQuizCards(item) : `<p class="muted">Quiz mode is exam-focused.</p>`),
     materials: () => `
       <p><strong>Uploaded files</strong></p>
-      <ul class="file-list">${item.uploadedFiles.length ? item.uploadedFiles.map((f) => `<li>${escapeHtml(f.fileName)} (${f.fileType.toUpperCase()})</li>`).join("") : "<li>No files uploaded.</li>"}</ul>
+      <ul class="file-list">${
+        item.uploadedFiles.length
+          ? item.uploadedFiles
+              .map(
+                (f) => `<li>
+                <strong>${escapeHtml(f.fileName)}</strong> (${f.fileType.toUpperCase()})<br />
+                <span class="${f.extractionStatus === "success" ? "priority low" : "priority high"}">
+                  ${escapeHtml(f.extractionStatus === "success" ? "Text extracted successfully" : f.extractionMessage || "Could not extract text")}
+                </span>
+              </li>`
+              )
+              .join("")
+          : "<li>No files uploaded.</li>"
+      }</ul>
       <p><strong>Extracted PDF/TXT Summary</strong></p>
       <p class="muted">${escapeHtml(item.summaryNotes)}</p>
       <p class="muted">${escapeHtml((item.extractedText || "No extracted text.").slice(0, 2200))}</p>`,
@@ -1281,15 +1333,54 @@ function buildWeekSchedule(items) {
 
 async function extractPdfText(file) {
   if (!window.pdfjsLib) throw new Error("PDF.js unavailable");
-  const data = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data }).promise;
-  let text = "";
-  for (let pageNo = 1; pageNo <= pdf.numPages; pageNo += 1) {
-    const page = await pdf.getPage(pageNo);
-    const content = await page.getTextContent();
-    text += `\n[Page ${pageNo}] ` + content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = window.pdfjsLib.getDocument({
+    data: arrayBuffer,
+    useSystemFonts: true,
+  });
+
+  const pdf = await loadingTask.promise;
+  const pageChunks = [];
+  let visibleCharCount = 0;
+
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+    try {
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      visibleCharCount += pageText.replace(/\s+/g, "").length;
+      if (pageText) {
+        pageChunks.push(`[Page ${pageNum}] ${pageText}`);
+      }
+    } catch (pageError) {
+      console.error(`Failed to read PDF page ${pageNum}`, pageError);
+    }
   }
-  return text.trim();
+
+  const text = pageChunks.join("\n\n").trim();
+  const likelyScanned = visibleCharCount < 40 || text.length < 60;
+
+  if (!text || likelyScanned) {
+    return {
+      text,
+      status: "likely_scanned",
+      likelyScanned: true,
+      message: "This PDF may be image-based or scanned, so text could not be extracted cleanly.",
+    };
+  }
+
+  return {
+    text,
+    status: "success",
+    likelyScanned: false,
+    message: "Text extracted successfully.",
+  };
 }
 
 function parseTopicDifficulty(text) {

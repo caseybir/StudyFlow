@@ -336,7 +336,7 @@ function renderAddForm(item = null) {
       const textEl = root.querySelector(`[name='study_${key}']`);
       const statusMessages = [];
       for (const file of files) {
-        statusEl.textContent = `Uploading ${file.name}...`;
+        statusEl.textContent = file.name.toLowerCase().endsWith('.pdf') ? 'Uploading PDF...' : `Uploading ${file.name}...`;
         const entry = { name: file.name, type: file.type || 'unknown', extractionStatus: 'pending', extractionMessage: '' };
         if (file.name.toLowerCase().endsWith('.txt')) {
           const txt = await file.text();
@@ -345,8 +345,10 @@ function renderAddForm(item = null) {
           draft[key].text = `${draft[key].text}\n${txt}`.trim();
           textEl.value = draft[key].text;
         } else if (file.name.toLowerCase().endsWith('.pdf')) {
-          statusEl.textContent = `Extracting text from ${file.name}...`;
-          const res = await extractPdfText(file);
+          statusEl.textContent = `Extracting text...`;
+          const res = await extractPdfText(file, (message) => {
+            statusEl.textContent = message;
+          });
           entry.extractionStatus = res.status;
           entry.extractionMessage = res.message;
           if (res.text) {
@@ -593,7 +595,26 @@ function closeModal() {
   if (modal.open) modal.close();
 }
 
-async function extractPdfText(file) {
+async function runPdfOcrFallback(pdf, onProgress) {
+  const ocrPages = [];
+  for (let n = 1; n <= pdf.numPages; n += 1) {
+    onProgress?.(`Running OCR... (page ${n}/${pdf.numPages})`);
+    const page = await pdf.getPage(n);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d', { alpha: false });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    await page.render({ canvasContext: context, viewport }).promise;
+
+    const result = await window.Tesseract.recognize(canvas, 'eng');
+    const text = (result?.data?.text || '').replace(/\s+/g, ' ').trim();
+    if (text) ocrPages.push(`[Page ${n}] ${text}`);
+  }
+  return ocrPages.join('\n\n').trim();
+}
+
+async function extractPdfText(file, onProgress) {
   if (!window.pdfjsLib) {
     return { status: 'error', message: 'PDF engine unavailable. Refresh and try again.', text: '' };
   }
@@ -603,6 +624,7 @@ async function extractPdfText(file) {
     const pages = [];
     for (let n = 1; n <= pdf.numPages; n += 1) {
       try {
+        onProgress?.(`Extracting text... (page ${n}/${pdf.numPages})`);
         const page = await pdf.getPage(n);
         const content = await page.getTextContent();
         const txt = content.items.map((it) => ('str' in it ? it.str : '')).join(' ').replace(/\s+/g, ' ').trim();
@@ -613,7 +635,21 @@ async function extractPdfText(file) {
     }
     const joined = pages.join('\n\n').trim();
     if (joined.replace(/\s/g, '').length < 40) {
-      return { status: 'likely_scanned', message: 'This PDF appears to be scanned or image-based, so no selectable text was found.', text: '' };
+      if (!window.Tesseract) {
+        return { status: 'likely_scanned', message: 'This PDF appears to be scanned or image-based, so no selectable text was found.', text: '' };
+      }
+      try {
+        onProgress?.('Running OCR...');
+        const ocrText = await runPdfOcrFallback(pdf, onProgress);
+        if (ocrText.replace(/\s/g, '').length < 40) {
+          return { status: 'ocr_failed', message: 'OCR could not find readable text in this PDF.', text: '' };
+        }
+        onProgress?.('OCR complete');
+        return { status: 'ocr_success', message: 'Extracted with OCR', text: `[Extracted with OCR]\n${ocrText}` };
+      } catch (ocrError) {
+        console.warn('OCR fallback failed', ocrError);
+        return { status: 'ocr_failed', message: 'OCR failed for this PDF. Please try a clearer scan or paste notes manually.', text: '' };
+      }
     }
     return { status: 'success', message: 'PDF text extracted successfully.', text: joined };
   } catch (err) {

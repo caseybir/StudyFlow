@@ -103,6 +103,12 @@ function defaultPlan(type) {
   return { startDate: "", steps: [] };
 }
 
+function hasStructuredPlan(item) {
+  if (!item.generatedPlan) return false;
+  if (item.type === "exam") return Array.isArray(item.generatedPlan.studyDays) && item.generatedPlan.studyDays.length > 0;
+  return Array.isArray(item.generatedPlan.steps) && item.generatedPlan.steps.length > 0;
+}
+
 function persistItems() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.items));
 }
@@ -122,11 +128,11 @@ function setItems(nextItems) {
 
 function enrichItem(item) {
   const profile = analyzeAcademicContent(item);
-  const generatedPlan = generatePlan(item, profile);
-  const calendarEvents = buildCalendarEvents(item, generatedPlan);
-  const practiceQuestions = generatePracticeQuestions(item, profile);
-  const flashcards = generateFlashcards(item, profile);
-  const quiz = generateQuiz(item, flashcards.cards, profile);
+  const generatedPlan = hasStructuredPlan(item) ? item.generatedPlan : generatePlan(item, profile);
+  const calendarEvents = item.calendarEvents?.length ? item.calendarEvents : buildCalendarEvents(item, generatedPlan);
+  const practiceQuestions = item.practiceQuestions?.length ? item.practiceQuestions : generatePracticeQuestions(item, profile);
+  const flashcards = item.flashcards?.cards?.length ? { cards: item.flashcards.cards } : generateFlashcards(item, profile);
+  const quiz = item.quiz?.questions?.length ? { questions: item.quiz.questions } : generateQuiz(item, flashcards.cards, profile);
 
   const enriched = {
     ...item,
@@ -139,7 +145,7 @@ function enrichItem(item) {
     flashcards: {
       cards: flashcards.cards,
       index: Math.min(item.flashcards?.index || 0, Math.max(0, flashcards.cards.length - 1)),
-      flipped: false,
+      flipped: Boolean(item.flashcards?.flipped),
     },
     quiz: {
       questions: quiz.questions,
@@ -799,6 +805,13 @@ function openDetailModal(itemId) {
   setModalTab("overview");
 
   modal.querySelector("#close-modal").addEventListener("click", closeModal);
+  modal.addEventListener(
+    "click",
+    (event) => {
+      if (event.target === modal) closeModal();
+    },
+    { once: true }
+  );
   modal.querySelectorAll("[data-tab]").forEach((btn) => btn.addEventListener("click", () => setModalTab(btn.dataset.tab)));
   modal.querySelector("#edit-item").addEventListener("click", () => {
     state.activeView = "add";

@@ -30,16 +30,24 @@
           <p>Plan smarter. Study calmer. Perform better.</p>
         </div>
       </div>
-
       <nav id="top-nav" class="top-nav"></nav>
     </header>
 
     <main id="app" class="app"></main>
-
     <dialog id="item-modal" class="item-modal"></dialog>
 
     <template id="dashboard-view">
       <section class="stats-grid" id="stats-grid"></section>
+      <section class="split-grid">
+        <article class="card">
+          <h3>Next Study Block</h3>
+          <div id="next-study-block" class="list"></div>
+        </article>
+        <article class="card">
+          <h3>Alerts</h3>
+          <div id="dashboard-alerts" class="list"></div>
+        </article>
+      </section>
       <section class="split-grid">
         <article class="card">
           <div class="card-head">
@@ -79,25 +87,22 @@
           <label>
             Type
             <select name="type" required>
-              <option value="Exam">Exam</option>
-              <option value="Project">Project</option>
-              <option value="Assignment">Assignment</option>
+              <option value="exam">Exam</option>
+              <option value="project">Project</option>
+              <option value="assignment">Assignment</option>
             </select>
           </label>
           <label>Due Date / Exam Date <input name="dueDate" type="date" required /></label>
           <label>
             Priority
             <select name="priority" required>
-              <option value="High">High</option>
-              <option value="Medium" selected>Medium</option>
-              <option value="Low">Low</option>
+              <option value="high">High</option>
+              <option value="medium" selected>Medium</option>
+              <option value="low">Low</option>
             </select>
           </label>
-          <label>Notes<textarea name="notes" rows="5"></textarea></label>
-          <label>
-            Upload Materials (.txt / .pdf)
-            <input id="add-files" type="file" accept=".txt,.pdf" multiple />
-          </label>
+          <label>Notes<textarea name="notes" rows="5" placeholder="Topics, reminders, grading rubric, etc."></textarea></label>
+          <label>Upload Materials (.txt / .pdf) <input id="add-files" type="file" accept=".txt,.pdf" multiple /></label>
           <p id="add-upload-status" class="muted"></p>
           <ul id="add-upload-list" class="file-list"></ul>
           <div class="action-row">
@@ -115,11 +120,18 @@
           <h2 id="calendar-title"></h2>
           <button id="next-month" class="btn btn-ghost">→</button>
         </div>
+        <div class="calendar-weekdays" id="calendar-weekdays"></div>
         <div id="calendar-grid" class="calendar-grid"></div>
       </section>
-      <section class="card">
-        <h3>Upcoming Deadlines</h3>
-        <div id="calendar-upcoming" class="list"></div>
+      <section class="split-grid">
+        <article class="card">
+          <h3>Upcoming Events</h3>
+          <div id="calendar-upcoming" class="list"></div>
+        </article>
+        <article class="card">
+          <h3>Selected Day Events</h3>
+          <div id="day-events" class="list"></div>
+        </article>
       </section>
     </template>
 
@@ -132,11 +144,11 @@
 
     <template id="study-view">
       <section class="card">
-        <h2>Study Tools</h2>
-        <label>
-          Select Item
-          <select id="study-select"></select>
-        </label>
+        <div class="card-head">
+          <h2>Study Tools</h2>
+          <button id="study-open-detail" class="btn btn-ghost">Open Item Details</button>
+        </div>
+        <label>Select Item <select id="study-select"></select></label>
         <div id="study-buttons" class="action-row"></div>
         <div id="study-output" class="output"></div>
         <p id="study-empty" class="muted"></p>

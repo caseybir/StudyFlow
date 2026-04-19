@@ -18,6 +18,7 @@ const state = {
   items: loadItems(),
 };
 
+setItems(state.items);
 render();
 
 function loadItems() {
@@ -41,6 +42,8 @@ function normalizeItem(item) {
     type: (item.type || "assignment").toLowerCase(),
     dueDate: item.dueDate || toISO(addDays(new Date(), 7)),
     priority: (item.priority || "medium").toLowerCase(),
+    difficulty: (item.difficulty || "medium").toLowerCase(),
+    estimatedHours: Number(item.estimatedHours || 6),
     notes: item.notes || "",
     uploadedFiles: Array.isArray(item.uploadedFiles) ? item.uploadedFiles : [],
     extractedText: item.extractedText || "",
@@ -50,6 +53,9 @@ function normalizeItem(item) {
     practiceQuestions: Array.isArray(item.practiceQuestions) ? item.practiceQuestions : [],
     summaryNotes: item.summaryNotes || "",
     deliverables: Array.isArray(item.deliverables) ? item.deliverables : [],
+    progress: item.progress || { completedSessions: [], percent: 0, readiness: "Low" },
+    warnings: Array.isArray(item.warnings) ? item.warnings : [],
+    nextAction: item.nextAction || null,
     createdAt: item.createdAt || new Date().toISOString(),
     updatedAt: item.updatedAt || new Date().toISOString(),
   };
@@ -68,13 +74,31 @@ function persistItems() {
 function setItems(nextItems) {
   const deduped = [];
   const seen = new Set();
-  for (const item of nextItems.map(normalizeItem)) {
+  for (const item of nextItems.map((entry) => enrichItem(normalizeItem(entry)))) {
     if (seen.has(item.id)) continue;
     seen.add(item.id);
     deduped.push(item);
   }
   state.items = deduped;
   persistItems();
+}
+
+function enrichItem(item) {
+  const profile = item.academicProfile || analyzeAcademicContent(item);
+  const generatedPlan = item.generatedPlan?.startDate ? item.generatedPlan : generatePlan(item, profile);
+  const enriched = {
+    ...item,
+    academicProfile: profile,
+    generatedPlan,
+    calendarEvents: buildCalendarEvents({ ...item, generatedPlan }),
+    practiceQuestions: item.practiceQuestions?.length ? item.practiceQuestions : generatePracticeQuestions(item, profile),
+    summaryNotes: item.summaryNotes || generateSummaryNotes(item, profile),
+    deliverables: item.deliverables?.length ? item.deliverables : generateDeliverables(item),
+  };
+  enriched.progress = computeProgress(enriched);
+  enriched.warnings = buildRiskWarnings(enriched);
+  enriched.nextAction = computeNextAction(enriched);
+  return enriched;
 }
 
 function render() {
@@ -122,6 +146,11 @@ function renderDashboard() {
   const upcomingSessions = allCalendarEvents()
     .filter((event) => event.colorClass === "session" && daysUntil(event.date) >= 0)
     .sort((a, b) => new Date(`${a.date}T00:00:00`) - new Date(`${b.date}T00:00:00`));
+  const workload = computeWorkloadInsights(state.items);
+  const nextAction = computeGlobalNextAction(state.items);
+  const todayISO = toISO(new Date());
+  const todaySchedule = buildDailySchedule(state.items, todayISO);
+  const weekSchedule = buildWeekSchedule(state.items);
 
   const stats = [
     ["Total Items", items.length],
@@ -137,13 +166,23 @@ function renderDashboard() {
 
   document.getElementById("upcoming-list").innerHTML = renderItemRows(upcoming, "No upcoming deadlines.");
   document.getElementById("priority-list").innerHTML = renderItemRows(highPriority, "No high-priority items.");
+  document.getElementById("next-action-panel").innerHTML = nextAction
+    ? `<article class="banner-ok"><strong>${escapeHtml(nextAction.title)}</strong><p>${escapeHtml(nextAction.description)}</p></article>`
+    : `<p class="muted">Add an item to generate your next best action.</p>`;
+
+  document.getElementById("today-plan").innerHTML = todaySchedule.length
+    ? todaySchedule.map((entry) => `<article class="item-row" data-item-id="${entry.itemId}"><div><strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(entry.duration)} • ${escapeHtml(entry.label)}</small></div><span class="chevron">›</span></article>`).join("")
+    : `<p class="muted">No blocks scheduled for today.</p>`;
+  document.getElementById("week-plan").innerHTML = weekSchedule.length
+    ? weekSchedule.map((day) => `<article><strong>${escapeHtml(day.dayLabel)}:</strong> ${day.blocks.length} block(s), ${day.totalHours.toFixed(1)} hrs</article>`).join("")
+    : `<p class="muted">No week schedule generated yet.</p>`;
   document.getElementById("next-study-block").innerHTML = upcomingSessions.length
     ? renderEventRows(upcomingSessions.slice(0, 3), "No study sessions generated yet.")
     : `<p class="muted">No study sessions yet. Add an item to generate a plan.</p>`;
 
   const overdue = items.filter((item) => daysUntil(item.dueDate) < 0);
   const nextDue = items.find((item) => daysUntil(item.dueDate) >= 0);
-  const alerts = [];
+  const alerts = [`<p class="${workload.overloaded ? "banner-warning" : "banner-ok"}">${escapeHtml(workload.message)}</p>`];
   if (overdue.length) alerts.push(`<p><span class="pill priority high">Overdue</span> ${overdue.length} item(s) need attention now.</p>`);
   if (nextDue) alerts.push(`<p><span class="pill">Next Due</span> ${escapeHtml(nextDue.title)} on ${formatDate(nextDue.dueDate)}.</p>`);
   if (upcomingSessions[0]) alerts.push(`<p><span class="pill">Next Session</span> ${escapeHtml(upcomingSessions[0].title)} on ${formatDate(upcomingSessions[0].date)}.</p>`);
@@ -192,6 +231,8 @@ function renderAddForm(prefillItem = null) {
     form.type.value = prefillItem.type;
     form.dueDate.value = prefillItem.dueDate;
     form.priority.value = prefillItem.priority;
+    form.difficulty.value = prefillItem.difficulty || "medium";
+    form.estimatedHours.value = prefillItem.estimatedHours || 6;
     form.notes.value = prefillItem.notes || "";
     state.pendingFiles = [...prefillItem.uploadedFiles];
     uploadList.innerHTML = state.pendingFiles
@@ -262,6 +303,8 @@ function renderAddForm(prefillItem = null) {
       type: formData.type.toLowerCase(),
       dueDate: formData.dueDate,
       priority: formData.priority.toLowerCase(),
+      difficulty: (formData.difficulty || "medium").toLowerCase(),
+      estimatedHours: Number(formData.estimatedHours || 6),
       notes: (formData.notes || "").trim(),
       uploadedFiles: state.pendingFiles,
       extractedText: state.pendingFiles.map((file) => file.text || "").join("\n\n").trim(),
@@ -275,6 +318,9 @@ function renderAddForm(prefillItem = null) {
     baseItem.practiceQuestions = generatePracticeQuestions(baseItem, baseItem.academicProfile);
     baseItem.summaryNotes = generateSummaryNotes(baseItem, baseItem.academicProfile);
     baseItem.deliverables = generateDeliverables(baseItem);
+    baseItem.progress = computeProgress(baseItem);
+    baseItem.warnings = buildRiskWarnings(baseItem);
+    baseItem.nextAction = computeNextAction(baseItem);
 
     if (prefillItem) {
       setItems(state.items.map((item) => (item.id === baseItem.id ? baseItem : item)));
@@ -323,6 +369,9 @@ function renderCalendar() {
 
   document.getElementById("calendar-upcoming").innerHTML = renderEventRows(upcoming, "No upcoming events.");
   renderDayEvents(state.selectedDateISO);
+  document.getElementById("week-overview").innerHTML = buildWeekSchedule(state.items)
+    .map((day) => `<article><strong>${escapeHtml(day.dayLabel)}</strong> — ${day.blocks.map((b) => `${escapeHtml(b.title)} (${escapeHtml(b.duration)})`).join(", ") || "No blocks"}</article>`)
+    .join("");
 
   document.getElementById("prev-month").addEventListener("click", () => {
     state.monthCursor = new Date(year, month - 1, 1);
@@ -494,7 +543,7 @@ function buildStudyToolContent(item, toolKey) {
         : `<p>No study plan generated yet.</p>`;
     }
     if (toolKey === "summary") return `<p>${escapeHtml(item.summaryNotes || notesSummary)}</p><p><strong>Key topics:</strong> ${escapeHtml(topics.join(", ") || "None detected")}</p>`;
-    if (toolKey === "questions") return `<ol>${(item.practiceQuestions || topics.map((topic) => `Explain ${topic} and give one applied example.`)).map((q) => `<li>${escapeHtml(q)}</li>`).join("")}</ol>`;
+    if (toolKey === "questions") return `<ol>${(item.practiceQuestions || topics.map((topic) => ({ question: `Explain ${topic} and give one applied example.` }))).map((q) => `<li>${escapeHtml(q.question || q)}</li>`).join("")}</ol>`;
     return `<ul>${topics.map((topic) => `<li><strong>Q:</strong> ${escapeHtml(topic)}<br /><strong>A:</strong> Define it in your own words and give one example.</li>`).join("")}</ul>`;
   }
 
@@ -535,7 +584,13 @@ function openDetailModal(itemId) {
       <p><strong>Professor:</strong> ${escapeHtml(item.professor || "Not set")}</p>
       <p><strong>Due Date:</strong> ${formatDate(item.dueDate)}</p>
       <p><strong>Priority:</strong> <span class="priority ${item.priority}">${titleCase(item.priority)}</span></p>
+      <p><strong>Difficulty:</strong> ${titleCase(item.difficulty)} • <strong>Estimated Hours:</strong> ${item.estimatedHours}</p>
       <p><strong>Notes:</strong> ${escapeHtml(item.notes || "No notes")}</p>
+      <p><strong>Next Recommended Action:</strong> ${escapeHtml(item.nextAction?.title || "No action generated yet")}</p>
+      <p><strong>Status:</strong> <span class="pill">${escapeHtml(urgencyLabel(item))}</span></p>
+      <div class="progress"><span style="width:${item.progress.percent}%;"></span></div>
+      <p>${item.progress.percent}% complete • ${item.progress.completedSessions.length} completed sessions • Readiness: ${escapeHtml(item.progress.readiness)}</p>
+      ${(item.warnings || []).map((warning) => `<p class="banner-warning">${escapeHtml(warning)}</p>`).join("")}
     </div>`,
     timeline: () => renderPlanTimeline(item),
     materials: () => `<div>
@@ -556,9 +611,10 @@ function openDetailModal(itemId) {
       <p><strong>Summary Notes</strong></p>
       <p class="muted">${escapeHtml(item.summaryNotes || "No summary generated yet.")}</p>
       <p><strong>Practice Questions</strong></p>
-      <ol>${(item.practiceQuestions || []).map((q) => `<li>${escapeHtml(q)}</li>`).join("") || "<li>No practice questions yet.</li>"}</ol>
+      ${(item.practiceQuestions || []).map((q, index) => `<div class="practice-card"><p><strong>Prompt:</strong> ${escapeHtml(q.question || q)}</p><button class="btn btn-secondary" data-answer-id="${item.id}-${index}">Show Answer</button><p id="answer-${item.id}-${index}" class="muted" style="display:none;">${escapeHtml(q.answer || "Build your answer from notes and examples.")}</p></div>`).join("") || "<p>No practice questions yet.</p>"}
       <p><strong>Deliverables / Checklist</strong></p>
-      <ul>${(item.deliverables || []).map((d) => `<li>☐ ${escapeHtml(d)}</li>`).join("") || "<li>No deliverables listed yet.</li>"}</ul>
+      <ul>${(item.deliverables || []).map((d, idx) => `<li><label><input type="checkbox" data-progress-item="${item.id}" data-progress-index="${idx}" ${item.progress.completedSessions.includes(d) ? "checked" : ""}/> ${escapeHtml(d)}</label></li>`).join("") || "<li>No deliverables listed yet.</li>"}</ul>
+      <button class="btn btn-primary" data-focus-item="${item.id}">Start Focus Mode</button>
     </div>`,
   };
 
@@ -611,6 +667,17 @@ function openDetailModal(itemId) {
       button.classList.toggle("tool-btn-active", button.dataset.tab === tab);
     });
     modal.querySelector("#modal-content").innerHTML = tabContent[tab]();
+    modal.querySelectorAll("[data-answer-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const answer = modal.querySelector(`#answer-${btn.dataset.answerId}`);
+        if (!answer) return;
+        answer.style.display = answer.style.display === "none" ? "block" : "none";
+      });
+    });
+    modal.querySelectorAll("[data-progress-item]").forEach((checkbox) => {
+      checkbox.addEventListener("change", () => toggleProgressSession(item.id, item.deliverables[Number(checkbox.dataset.progressIndex)], checkbox.checked));
+    });
+    modal.querySelectorAll("[data-focus-item]").forEach((btn) => btn.addEventListener("click", () => openFocusMode(btn.dataset.focusItem)));
   }
 }
 
@@ -662,7 +729,10 @@ function renderEventRows(events, emptyMessage) {
             <strong>${escapeHtml(event.title)}</strong>
             <small>${formatDate(event.date)} • ${escapeHtml(event.label)} • ${escapeHtml(event.parentTitle)}</small>
           </div>
-          <span class="tag ${event.colorClass}">${titleCase(event.colorClass)}</span>
+          <div class="action-row">
+            <span class="tag ${event.colorClass}">${titleCase(event.colorClass)}</span>
+            ${event.colorClass === "session" ? `<button class="btn btn-ghost" data-reschedule="${event.itemId}" data-event-title="${encodeURIComponent(event.title)}" data-shift="1">Move +1d</button>` : ""}
+          </div>
         </article>`
     )
     .join("");
@@ -677,6 +747,12 @@ function bindItemClicks() {
 function bindEventClicks() {
   app.querySelectorAll("[data-item-id]").forEach((element) => {
     element.addEventListener("click", () => openDetailModal(element.dataset.itemId));
+  });
+  app.querySelectorAll("[data-reschedule]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      rescheduleSession(button.dataset.reschedule, decodeURIComponent(button.dataset.eventTitle), Number(button.dataset.shift || 1));
+    });
   });
 }
 
@@ -738,6 +814,7 @@ function generateExamPlan(item, profile) {
   const due = new Date(`${item.dueDate}T00:00:00`);
   const topics = profile.majorTopics.length ? [...profile.majorTopics, ...profile.minorTopics] : inferTopics(item);
   const daysAvailable = Math.max(4, Math.min(14, daysUntil(item.dueDate) || 6));
+  const hourFactor = Math.max(1, item.estimatedHours / 6);
   const priorityBias = item.priority === "high" ? 2 : item.priority === "medium" ? 1 : 0;
   const start = addDays(due, -(daysAvailable + priorityBias));
   const studyDays = [];
@@ -773,7 +850,7 @@ function generateExamPlan(item, profile) {
     studyDays.push({
       date,
       topic,
-      duration: `${Math.round((55 + (i % 2) * 25) * topicWeight)} min`,
+      duration: `${Math.round((55 + (i % 2) * 25) * topicWeight * hourFactor)} min`,
       description: `Learn and summarize ${topic}; finish with active recall and 5 self-test questions.`,
     });
   }
@@ -783,7 +860,7 @@ function generateExamPlan(item, profile) {
 
 function generateProjectPlan(item, profile) {
   const due = new Date(`${item.dueDate}T00:00:00`);
-  const scopeBias = Math.max(0, Math.min(5, Math.floor(profile.scopeScore / 2)));
+  const scopeBias = Math.max(0, Math.min(5, Math.floor(profile.scopeScore / 2) + (item.difficulty === "hard" ? 2 : 0)));
   const daysAvailable = Math.max(7, Math.min(30, (daysUntil(item.dueDate) || 10) + scopeBias));
   const start = addDays(due, -daysAvailable);
 
@@ -808,7 +885,7 @@ function generateProjectPlan(item, profile) {
 
 function generateAssignmentPlan(item) {
   const due = new Date(`${item.dueDate}T00:00:00`);
-  const daysAvailable = Math.max(3, Math.min(12, daysUntil(item.dueDate) || 5));
+  const daysAvailable = Math.max(3, Math.min(12, (daysUntil(item.dueDate) || 5) + (item.difficulty === "hard" ? 1 : 0)));
   const start = addDays(due, -daysAvailable);
 
   const stepsTemplate = [
@@ -892,9 +969,18 @@ function analyzeAcademicContent(item) {
 function generatePracticeQuestions(item, profile = analyzeAcademicContent(item)) {
   if (item.type !== "exam") return [];
   return profile.topics.slice(0, 6).flatMap((topic) => [
-    `Concept check: Define ${topic} in your own words.`,
-    `Application: Solve one example problem that uses ${topic}.`,
-    `Active recall: What mistake do students commonly make with ${topic}, and how can you avoid it?`,
+    {
+      question: `Concept check: Define ${topic} in your own words.`,
+      answer: `${topic} is a core concept; explain definition, why it matters, and one course-specific example.`,
+    },
+    {
+      question: `Application: Solve one example problem that uses ${topic}.`,
+      answer: `Set up the problem, solve step-by-step, and check units/assumptions at the end.`,
+    },
+    {
+      question: `Active recall: What mistake do students commonly make with ${topic}, and how can you avoid it?`,
+      answer: `List one common error and create a quick checkpoint you can use before submitting answers.`,
+    },
   ]);
 }
 
@@ -912,6 +998,179 @@ function generateDeliverables(item) {
     return ["Requirements clarified", "Draft completed", "Revision pass complete", "Final files submitted"];
   }
   return ["Prompt fully understood", "Outline/draft complete", "Final edit done", "Submission checklist verified"];
+}
+
+function computeNextAction(item) {
+  const upcoming = (item.calendarEvents || [])
+    .filter((event) => daysUntil(event.date) >= 0)
+    .sort((a, b) => new Date(`${a.date}T00:00:00`) - new Date(`${b.date}T00:00:00`))[0];
+  if (upcoming) {
+    return {
+      title: `${upcoming.title} — ${estimateEventDuration(upcoming.title, item)} min`,
+      description: `${formatDate(upcoming.date)} • ${titleCase(item.type)} • ${titleCase(item.priority)} priority`,
+      date: upcoming.date,
+    };
+  }
+  return { title: `Review ${item.title}`, description: "No upcoming sessions; do a 30-minute checkpoint.", date: toISO(new Date()) };
+}
+
+function computeGlobalNextAction(items) {
+  return items
+    .map((item) => item.nextAction || computeNextAction(item))
+    .sort((a, b) => new Date(`${a.date}T00:00:00`) - new Date(`${b.date}T00:00:00`))[0] || null;
+}
+
+function computeProgress(item) {
+  const total = (item.deliverables || []).length || (item.calendarEvents || []).length || 1;
+  const completed = (item.progress?.completedSessions || []).filter(Boolean);
+  const percent = Math.min(100, Math.round((completed.length / total) * 100));
+  const readiness = item.type === "exam" ? (percent > 70 ? "High" : percent > 35 ? "Medium" : "Low") : percent > 60 ? "On Track" : "In Progress";
+  return { completedSessions: completed, percent, readiness };
+}
+
+function buildRiskWarnings(item) {
+  const warnings = [];
+  const daysLeft = daysUntil(item.dueDate);
+  const remainingBlocks = Math.max(1, (item.calendarEvents || []).length - item.progress.completedSessions.length);
+  if (daysLeft < 0) warnings.push("This item is overdue. Prioritize immediate completion.");
+  if (daysLeft <= 2 && item.progress.percent < 70) warnings.push("Due soon with limited completion. Focus on highest-impact tasks now.");
+  if (remainingBlocks > Math.max(1, daysLeft + 1)) warnings.push("At current pace, you may not finish before due date.");
+  if (item.type === "exam" && item.academicProfile?.majorTopics?.length > daysLeft + 1) warnings.push("Exam has many major topics left for remaining time.");
+  if (!warnings.length) warnings.push("On track. Keep steady progress.");
+  return warnings;
+}
+
+function computeWorkloadInsights(items) {
+  const events = allCalendarEvents().filter((event) => daysUntil(event.date) >= 0 && daysUntil(event.date) <= 7);
+  const deadlines = items.filter((item) => daysUntil(item.dueDate) >= 0 && daysUntil(item.dueDate) <= 5).length;
+  const totalMinutes = events.reduce((acc, event) => acc + estimateEventDuration(event.title, items.find((i) => i.id === event.itemId)), 0);
+  const hrsPerDay = totalMinutes / 60 / 7;
+  const overloaded = hrsPerDay > 3.5 || deadlines >= 4;
+  return {
+    overloaded,
+    message: `You have ${deadlines} deadline(s) in the next 5 days. Recommended workload: ${hrsPerDay.toFixed(1)} hrs/day.${overloaded ? " You are overloaded—move one block earlier." : " Pace is manageable."}`,
+  };
+}
+
+function buildDailySchedule(items, dateISO) {
+  return allCalendarEvents()
+    .filter((event) => event.date === dateISO)
+    .map((event) => ({
+      itemId: event.itemId,
+      title: event.title,
+      duration: `${estimateEventDuration(event.title, items.find((i) => i.id === event.itemId))} min`,
+      label: event.label,
+    }));
+}
+
+function buildWeekSchedule(items) {
+  const week = [];
+  for (let i = 0; i < 7; i += 1) {
+    const day = addDays(new Date(), i);
+    const iso = toISO(day);
+    const blocks = buildDailySchedule(items, iso);
+    week.push({
+      date: iso,
+      dayLabel: day.toLocaleDateString(undefined, { weekday: "long" }),
+      blocks,
+      totalHours: blocks.reduce((acc, block) => acc + Number(block.duration.replace(" min", "")) / 60, 0),
+    });
+  }
+  return week;
+}
+
+function estimateEventDuration(title, item) {
+  const match = String(title).match(/(\d+)\s*min/i);
+  if (match) return Number(match[1]);
+  const baseline = item?.difficulty === "hard" ? 75 : item?.difficulty === "easy" ? 35 : 50;
+  return baseline;
+}
+
+function urgencyLabel(item) {
+  const days = daysUntil(item.dueDate);
+  if (days < 0) return "Behind";
+  if (days <= 1) return "Due soon";
+  if (item.progress.percent < 25 && days <= 4) return "Start now";
+  if (item.progress.percent >= 70) return "On track";
+  return "Review today";
+}
+
+function toggleProgressSession(itemId, label, checked) {
+  const item = state.items.find((entry) => entry.id === itemId);
+  if (!item) return;
+  const set = new Set(item.progress.completedSessions || []);
+  if (checked) set.add(label);
+  else set.delete(label);
+  item.progress.completedSessions = [...set];
+  const refreshed = enrichItem(item);
+  setItems(state.items.map((entry) => (entry.id === itemId ? refreshed : entry)));
+  openDetailModal(itemId);
+}
+
+function rescheduleSession(itemId, title, shiftDays = 1) {
+  const item = state.items.find((entry) => entry.id === itemId);
+  if (!item) return;
+  let moved = false;
+  if (item.type === "exam") {
+    item.generatedPlan.studyDays = item.generatedPlan.studyDays.map((day) => {
+      if (!moved && day.topic === title) {
+        moved = true;
+        return { ...day, date: toISO(addDays(new Date(`${day.date}T00:00:00`), shiftDays)) };
+      }
+      return day;
+    });
+  } else {
+    item.generatedPlan.steps = item.generatedPlan.steps.map((step) => {
+      if (!moved && step.title === title) {
+        moved = true;
+        return { ...step, date: toISO(addDays(new Date(`${step.date}T00:00:00`), shiftDays)) };
+      }
+      return step;
+    });
+  }
+  const refreshed = enrichItem(item);
+  setItems(state.items.map((entry) => (entry.id === itemId ? refreshed : entry)));
+  render();
+}
+
+function openFocusMode(itemId) {
+  const item = state.items.find((entry) => entry.id === itemId);
+  if (!item) return;
+  const action = item.nextAction || computeNextAction(item);
+  modal.innerHTML = `<div class="modal-head"><h2>Focus Mode: ${escapeHtml(item.title)}</h2><button id="close-modal" class="btn btn-ghost">Close</button></div>
+  <p class="warm-note">${escapeHtml(action.title)}</p>
+  <p>${escapeHtml(action.description)}</p>
+  <div class="timer" id="focus-timer">25:00</div>
+  <div class="action-row"><button class="btn btn-primary" id="start-timer">Start</button><button class="btn btn-ghost" id="reset-timer">Reset</button></div>`;
+  modal.showModal();
+  document.getElementById("close-modal").addEventListener("click", closeModal);
+  let seconds = 25 * 60;
+  let timer = null;
+  const tick = () => {
+    const m = String(Math.floor(seconds / 60)).padStart(2, "0");
+    const s = String(seconds % 60).padStart(2, "0");
+    document.getElementById("focus-timer").textContent = `${m}:${s}`;
+  };
+  tick();
+  document.getElementById("start-timer").addEventListener("click", () => {
+    if (timer) return;
+    timer = setInterval(() => {
+      seconds -= 1;
+      tick();
+      if (seconds <= 0) {
+        clearInterval(timer);
+        timer = null;
+      }
+    }, 1000);
+  });
+  document.getElementById("reset-timer").addEventListener("click", () => {
+    seconds = 25 * 60;
+    tick();
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  });
 }
 
 async function extractPdfText(file) {

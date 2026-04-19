@@ -110,6 +110,18 @@ textarea { resize: vertical; }
 .chevron { color: #7dd3fc; font-weight: 800; }
 .item-row small { color: var(--muted); display: block; }
 .warm-note { color: #fde68a; }
+.banner-warning {
+  background: rgba(251, 113, 133, 0.12);
+  border: 1px solid rgba(251, 113, 133, 0.45);
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+}
+.banner-ok {
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.45);
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+}
 
 .tag { border-radius: 999px; padding: 0.15rem 0.5rem; font-size: 0.72rem; font-weight: 700; text-transform: capitalize; }
 .tag.exam { background: #11304a; color: #67e8f9; }
@@ -128,6 +140,30 @@ textarea { resize: vertical; }
   font-weight: 700;
   background: #1b2a49;
   border: 1px solid #35507d;
+}
+.progress {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #101a31;
+  border: 1px solid #294372;
+  overflow: hidden;
+}
+.progress > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #22d3ee, #8b5cf6);
+}
+.practice-card {
+  border: 1px solid #304a78;
+  border-radius: 10px;
+  padding: 0.55rem;
+  margin-bottom: 0.5rem;
+  background: #12203d;
+}
+.timer {
+  font-size: 2rem;
+  font-weight: 700;
 }
 
 .calendar-head { display: flex; justify-content: space-between; align-items: center; }

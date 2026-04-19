@@ -35,6 +35,39 @@ function emptyStudyInputs() {
   };
 }
 
+function emptyAiAnalysis() {
+  return {
+    summary: '',
+    likelyTopics: [],
+    difficultyEstimate: '',
+    vocabTerms: [],
+    practiceQuestionIdeas: [],
+  };
+}
+
+function normalizeAiAnalysis(raw) {
+  const base = { ...emptyAiAnalysis(), ...(raw || {}) };
+  return {
+    summary: String(base.summary || ''),
+    likelyTopics: Array.isArray(base.likelyTopics) ? base.likelyTopics.map(String).filter(Boolean) : [],
+    difficultyEstimate: String(base.difficultyEstimate || ''),
+    vocabTerms: Array.isArray(base.vocabTerms) ? base.vocabTerms.map(String).filter(Boolean) : [],
+    practiceQuestionIdeas: Array.isArray(base.practiceQuestionIdeas) ? base.practiceQuestionIdeas.map(String).filter(Boolean) : [],
+  };
+}
+
+function mergeAiAnalysis(target, incoming) {
+  const base = normalizeAiAnalysis(target);
+  const next = normalizeAiAnalysis(incoming);
+  return {
+    summary: [base.summary, next.summary].filter(Boolean).join('\n\n').trim(),
+    likelyTopics: Array.from(new Set([...base.likelyTopics, ...next.likelyTopics])),
+    difficultyEstimate: next.difficultyEstimate || base.difficultyEstimate,
+    vocabTerms: Array.from(new Set([...base.vocabTerms, ...next.vocabTerms])),
+    practiceQuestionIdeas: Array.from(new Set([...base.practiceQuestionIdeas, ...next.practiceQuestionIdeas])),
+  };
+}
+
 function normalizeItem(raw) {
   const studyInputs = { ...emptyStudyInputs(), ...(raw.studyInputs || {}) };
   for (const key of SECTION_KEYS) {
@@ -61,6 +94,7 @@ function normalizeItem(raw) {
     flashcards: Array.isArray(raw.flashcards) ? raw.flashcards : [],
     quiz: Array.isArray(raw.quiz) ? raw.quiz : [],
     mastery: raw.mastery || { know: 0, studyAgain: 0, quizScore: 0 },
+    aiAnalysis: normalizeAiAnalysis(raw.aiAnalysis),
     createdAt: raw.createdAt || Date.now(),
     updatedAt: raw.updatedAt || Date.now(),
   };
@@ -87,9 +121,12 @@ function inferTopics(item) {
   }
   const inferred = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, count]) => ({ name, weight: count }));
   if (explicit.length) {
-    return explicit.map((name, i) => ({ name, weight: explicit.length - i + 2 }));
+    const aiTopics = item.aiAnalysis?.likelyTopics || [];
+    return [...explicit.map((name, i) => ({ name, weight: explicit.length - i + 2 })), ...aiTopics.map((name) => ({ name, weight: 6 }))];
   }
-  return inferred.length ? inferred : [{ name: 'Core concepts', weight: 4 }, { name: 'Practice problems', weight: 3 }];
+  const aiTopics = (item.aiAnalysis?.likelyTopics || []).map((name) => ({ name, weight: 6 }));
+  const merged = [...aiTopics, ...inferred];
+  return merged.length ? merged : [{ name: 'Core concepts', weight: 4 }, { name: 'Practice problems', weight: 3 }];
 }
 
 function addDays(d, days) {
@@ -162,6 +199,10 @@ function generateAssignmentPlan(item) {
 }
 
 function generatePracticeQuestions(item) {
+  const aiIdeas = item.aiAnalysis?.practiceQuestionIdeas || [];
+  if (aiIdeas.length) {
+    return aiIdeas.slice(0, 8).map((q, i) => ({ q: `AI Practice ${i + 1}: ${q}`, a: 'Use your notes and explain why your answer is correct.' }));
+  }
   const src = `${item.studyInputs.homework.text}\n${item.studyInputs.classPractice.text}`;
   const lines = src.split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 6);
   if (lines.length) return lines.map((q, i) => ({ q: `Practice ${i + 1}: ${q}`, a: 'Explain your reasoning and verify with notes.' }));
@@ -169,6 +210,10 @@ function generatePracticeQuestions(item) {
 }
 
 function generateFlashcards(item) {
+  const aiTerms = item.aiAnalysis?.vocabTerms || [];
+  if (aiTerms.length) {
+    return aiTerms.slice(0, 16).map((term) => ({ front: `Term: ${term}`, back: `Define ${term} and explain where it appears in this class.` }));
+  }
   const rows = item.studyInputs.vocab.text.split('\n').map((r) => r.trim()).filter(Boolean);
   const cards = [];
   for (const row of rows) {
@@ -327,6 +372,7 @@ function renderAddForm(item = null) {
   `;
 
   const draft = structuredClone(cur.studyInputs);
+  let draftAiAnalysis = normalizeAiAnalysis(cur.aiAnalysis);
 
   root.querySelectorAll('[data-upload-key]').forEach((input) => {
     input.addEventListener('change', async (ev) => {
@@ -354,6 +400,17 @@ function renderAddForm(item = null) {
           if (res.text) {
             draft[key].text = `${draft[key].text}\n${res.text}`.trim();
             textEl.value = draft[key].text;
+          }
+          try {
+            const analysis = await analyzePdfWithBackend(file, (message) => { statusEl.textContent = message; });
+            if (analysis) {
+              draftAiAnalysis = mergeAiAnalysis(draftAiAnalysis, analysis);
+              entry.analysisStatus = 'analyzed';
+              entry.analysisSummary = analysis.summary || '';
+            }
+          } catch (analysisErr) {
+            console.warn('Backend PDF analysis failed', analysisErr);
+            entry.analysisStatus = 'analysis_failed';
           }
         } else {
           entry.extractionStatus = 'warning';
@@ -389,6 +446,7 @@ function renderAddForm(item = null) {
       dueDate: String(fd.get('dueDate')),
       priority: String(fd.get('priority')),
       notes: String(fd.get('notes')).trim(),
+      aiAnalysis: draftAiAnalysis,
       studyInputs: SECTION_KEYS.reduce((acc, key) => {
         acc[key] = { text: String(fd.get(`study_${key}`) || ''), files: draft[key].files };
         return acc;
@@ -612,6 +670,23 @@ async function runPdfOcrFallback(pdf, onProgress) {
     if (text) ocrPages.push(`[Page ${n}] ${text}`);
   }
   return ocrPages.join('\n\n').trim();
+}
+
+async function analyzePdfWithBackend(file, onProgress) {
+  onProgress?.('Analyzing PDF...');
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+  const response = await fetch('/api/analyze-pdf', {
+    method: 'POST',
+    body: formData,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || 'PDF analysis request failed');
+  }
+  const data = await response.json();
+  onProgress?.('Analysis complete');
+  return normalizeAiAnalysis(data.analysis || data);
 }
 
 async function extractPdfText(file, onProgress) {

@@ -218,7 +218,7 @@ function renderDashboard() {
   const nextAction = computeGlobalNextAction(items);
   document.getElementById("next-action-panel").innerHTML = nextAction
     ? `<article class="banner-ok"><strong>${escapeHtml(nextAction.title)}</strong><p>${escapeHtml(nextAction.description)}</p></article>`
-    : `<p class="muted">No tasks yet. Add your first exam, assignment, or project to generate a plan.</p>`;
+    : `<p class="muted">Your next study action will appear here. Add your first exam or assignment to generate a study plan.</p>`;
 
   document.getElementById("next-study-block").innerHTML = renderEventRows(nextSessions.slice(0, 3), "No generated sessions yet.");
 
@@ -229,11 +229,11 @@ function renderDashboard() {
     ? todayPlan
         .map((entry) => `<article class="item-row" data-item-id="${entry.itemId}"><div><strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(entry.duration)} • ${escapeHtml(entry.label)}</small></div><span class="chevron">›</span></article>`)
         .join("")
-    : `<p class="muted">No study sessions scheduled yet. Upload a study guide or add an exam to get started.</p>`;
+    : `<p class="muted">No study sessions scheduled yet. Add your first exam or assignment to generate a study plan.</p>`;
 
   document.getElementById("week-plan").innerHTML = weekPlan.length
     ? weekPlan.map((day) => `<article><strong>${escapeHtml(day.dayLabel)}</strong> — ${day.blocks.length} block(s), ${day.totalHours.toFixed(1)} hrs</article>`).join("")
-    : `<p class="muted">No schedule generated this week.</p>`;
+    : `<p class="muted">Your weekly workload will appear here once plans are generated.</p>`;
 
   const workload = computeWorkloadInsights(state.items);
   const overdue = items.filter((item) => daysUntil(item.dueDate) < 0);
@@ -242,7 +242,7 @@ function renderDashboard() {
     ...overdue.map((item) => `<p class="banner-warning">Overdue: ${escapeHtml(item.title)} (${escapeHtml(item.className)})</p>`),
     ...items.flatMap((item) => (item.warnings || []).slice(0, 1).map((w) => `<p>${escapeHtml(item.title)}: ${escapeHtml(w)}</p>`)),
   ];
-  document.getElementById("dashboard-alerts").innerHTML = riskRows.join("") || `<p class="muted">Your calendar will fill automatically once you create a plan.</p>`;
+  document.getElementById("dashboard-alerts").innerHTML = riskRows.join("") || `<p class="muted">No current risks. You’re on track this week.</p>`;
 
   app.querySelectorAll("[data-nav]").forEach((button) => {
     button.addEventListener("click", () => {

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StudyFlow</title>
+  <link rel="stylesheet" href="style.css" />
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.min.js"></script>
+  <script defer src="script.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">
+      <span class="logo-dot"></span>
+      <div>
+        <h1>StudyFlow</h1>
+        <p>Plan smarter. Study calmer. Perform better.</p>
+      </div>
+    </div>
+    <nav class="nav" id="top-nav">
+      <button data-view="dashboard" class="nav-btn active">Dashboard</button>
+      <button data-view="calendar" class="nav-btn">Calendar</button>
+      <button data-view="classes" class="nav-btn">Classes</button>
+      <button data-view="study" class="nav-btn">Study Tools</button>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section id="view-dashboard" class="view active"></section>
+    <section id="view-add" class="view"></section>
+    <section id="view-calendar" class="view"></section>
+    <section id="view-classes" class="view"></section>
+    <section id="view-study" class="view"></section>
+  </main>
+
+  <dialog id="item-modal" class="modal">
+    <div id="modal-content"></div>
+  </dialog>
+</body>
+</html>

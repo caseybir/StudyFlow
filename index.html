@@ -1,204 +1,40 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>StudyFlow | Dark Academic Dashboard</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
-    />
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <header class="topbar">
-      <div class="brand">
-        <svg class="logo" viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <defs>
-            <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0%" stop-color="#22d3ee" />
-              <stop offset="100%" stop-color="#8b5cf6" />
-            </linearGradient>
-          </defs>
-          <rect x="4" y="4" width="48" height="48" rx="14" fill="url(#g)" opacity="0.25" />
-          <path d="M17 36V18h4l7 9 7-9h4v18h-4V25l-7 9-7-9v11h-4z" fill="#e2e8f0" />
-        </svg>
-        <div>
-          <h1>StudyFlow</h1>
-          <p>Plan smarter. Study calmer. Perform better.</p>
-        </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StudyFlow</title>
+  <link rel="stylesheet" href="style.css" />
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.min.js"></script>
+  <script defer src="script.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">
+      <span class="logo-dot"></span>
+      <div>
+        <h1>StudyFlow</h1>
+        <p>Plan smarter. Study calmer. Perform better.</p>
       </div>
-      <nav id="top-nav" class="top-nav"></nav>
-    </header>
+    </div>
+    <nav class="nav" id="top-nav">
+      <button data-view="dashboard" class="nav-btn active">Dashboard</button>
+      <button data-view="calendar" class="nav-btn">Calendar</button>
+      <button data-view="classes" class="nav-btn">Classes</button>
+      <button data-view="study" class="nav-btn">Study Tools</button>
+    </nav>
+  </header>
 
-    <main id="app" class="app"></main>
-    <dialog id="item-modal" class="item-modal"></dialog>
+  <main class="container">
+    <section id="view-dashboard" class="view active"></section>
+    <section id="view-add" class="view"></section>
+    <section id="view-calendar" class="view"></section>
+    <section id="view-classes" class="view"></section>
+    <section id="view-study" class="view"></section>
+  </main>
 
-    <template id="dashboard-view">
-      <section class="card hero-card">
-        <p class="hero-kicker">StudyFlow</p>
-        <h2>Plan smarter. Study calmer. Perform better.</h2>
-        <p class="hero-sub">Organize your exams, assignments, and projects with a personalized study plan.</p>
-        <div class="action-row hero-actions">
-          <button class="btn btn-primary btn-cta" data-nav="add">+ Add New</button>
-          <button class="btn btn-ghost" data-nav="calendar">Open Calendar</button>
-        </div>
-      </section>
-
-      <section class="metrics-strip" id="stats-grid"></section>
-
-      <section class="split-grid dashboard-primary">
-        <article class="card featured-card">
-          <div class="card-head">
-            <h3>Next Study Action</h3>
-            <button class="btn btn-ghost" data-next-open="1">Open Item</button>
-          </div>
-          <div id="next-action-panel" class="list"></div>
-        </article>
-        <article class="card">
-          <h3>Today's Plan</h3>
-          <div id="today-plan" class="list agenda-list"></div>
-        </article>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h3>Upcoming Deadlines</h3>
-          <button class="btn btn-ghost" data-nav="calendar">View Full Calendar</button>
-        </div>
-        <div id="upcoming-list" class="list"></div>
-      </section>
-
-      <section class="split-grid">
-        <article class="card soft-panel">
-          <h3>This Week's Load</h3>
-          <div id="week-plan" class="list"></div>
-        </article>
-        <article class="card soft-panel">
-          <h3>Next Study Sessions</h3>
-          <div id="next-study-block" class="list"></div>
-        </article>
-      </section>
-
-      <section class="card soft-panel">
-        <h3>Risk Warnings</h3>
-        <div id="dashboard-alerts" class="list"></div>
-      </section>
-
-      <section class="split-grid">
-        <article class="card">
-          <h3>High Priority</h3>
-          <div id="priority-list" class="list"></div>
-        </article>
-        <article class="card">
-          <h3>Recent Uploads</h3>
-          <div id="recent-uploads" class="list"></div>
-        </article>
-      </section>
-    </template>
-
-    <template id="add-view">
-      <section class="card">
-        <h2>Add New Academic Item</h2>
-        <form id="add-form" class="grid-form">
-          <label>Title <input name="title" type="text" required /></label>
-          <label>Class Name <input name="className" type="text" required /></label>
-          <label>Professor (optional) <input name="professor" type="text" /></label>
-          <label>
-            Type
-            <select name="type" required>
-              <option value="exam">Exam</option>
-              <option value="project">Project</option>
-              <option value="assignment">Assignment</option>
-            </select>
-          </label>
-          <label>Due Date / Exam Date <input name="dueDate" type="date" required /></label>
-          <label>
-            Priority
-            <select name="priority" required>
-              <option value="high">High</option>
-              <option value="medium" selected>Medium</option>
-              <option value="low">Low</option>
-            </select>
-          </label>
-          <label>
-            Difficulty
-            <select name="difficulty">
-              <option value="easy">Easy</option>
-              <option value="medium" selected>Medium</option>
-              <option value="hard">Hard</option>
-            </select>
-          </label>
-          <label>Estimated Total Hours <input name="estimatedHours" type="number" min="1" max="200" step="0.5" value="6" /></label>
-
-          <label>Exam Topics / Study Guide Topics<textarea name="examTopics" rows="3" placeholder="e.g. Limits, Derivatives, Integrals"></textarea></label>
-          <label>Topic Difficulty (one per line: Topic: easy/medium/hard)<textarea name="topicDifficulty" rows="3" placeholder="Derivatives: hard"></textarea></label>
-          <label>Homework Problems / Sets<textarea name="homeworkQuestions" rows="3" placeholder="Paste homework prompts or problem numbers"></textarea></label>
-          <label>Class Practice / Review Sheet Questions<textarea name="classQuestions" rows="3" placeholder="Paste class practice and review questions"></textarea></label>
-          <label>Weak Areas (optional)<textarea name="weakAreas" rows="2" placeholder="What still feels weak?"></textarea></label>
-          <label>Vocab / Terms / Formulas (one per line, use Term - Definition)<textarea name="vocabTerms" rows="4" placeholder="Photosynthesis - Process plants use to convert light"></textarea></label>
-
-          <label>Notes<textarea name="notes" rows="5" placeholder="Topics, reminders, grading rubric, etc."></textarea></label>
-          <label>Upload Materials (.txt / .pdf) <input id="add-files" type="file" accept=".txt,.pdf" multiple /></label>
-          <p id="add-upload-status" class="muted"></p>
-          <ul id="add-upload-list" class="file-list"></ul>
-          <div class="action-row">
-            <button type="submit" class="btn btn-primary">Save Item</button>
-            <button type="button" id="reset-add" class="btn btn-ghost">Reset</button>
-          </div>
-        </form>
-      </section>
-    </template>
-
-    <template id="calendar-view">
-      <section class="card">
-        <div class="calendar-head">
-          <button id="prev-month" class="btn btn-ghost">←</button>
-          <h2 id="calendar-title"></h2>
-          <button id="next-month" class="btn btn-ghost">→</button>
-        </div>
-        <div class="calendar-weekdays" id="calendar-weekdays"></div>
-        <div id="calendar-grid" class="calendar-grid"></div>
-      </section>
-      <section class="split-grid">
-        <article class="card">
-          <h3>Upcoming Events</h3>
-          <div id="calendar-upcoming" class="list"></div>
-        </article>
-        <article class="card">
-          <h3>Selected Day Events</h3>
-          <div id="day-events" class="list"></div>
-        </article>
-      </section>
-      <section class="card">
-        <h3>Week Overview</h3>
-        <div id="week-overview" class="list"></div>
-      </section>
-    </template>
-
-    <template id="classes-view">
-      <section class="card">
-        <h2>Classes View</h2>
-        <div id="classes-grouped" class="classes-grouped"></div>
-      </section>
-    </template>
-
-    <template id="study-view">
-      <section class="card">
-        <div class="card-head">
-          <h2>Study Tools</h2>
-          <button id="study-open-detail" class="btn btn-ghost">Open Item Details</button>
-        </div>
-        <label>Select Item <select id="study-select"></select></label>
-        <div id="study-buttons" class="action-row"></div>
-        <div id="study-output" class="output"></div>
-        <p id="study-empty" class="muted"></p>
-      </section>
-    </template>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.3.136/pdf.min.js"></script>
-    <script src="script.js"></script>
-  </body>
+  <dialog id="item-modal" class="modal">
+    <div id="modal-content"></div>
+  </dialog>
+</body>
 </html>
